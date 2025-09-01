@@ -1,0 +1,155 @@
+import { useState } from 'react';
+import { ChatPanel } from './ChatPanel';
+import { BrowserPanel } from './BrowserPanel';
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
+import { Terminal, Globe } from 'lucide-react';
+
+export interface AutomationStep {
+  id: string;
+  command: string;
+  generatedCode: string;
+  status: 'pending' | 'executing' | 'success' | 'error';
+  timestamp: Date;
+  screenshot?: string;
+  errorMessage?: string;
+}
+
+const AutomationSystem = () => {
+  const [steps, setSteps] = useState<AutomationStep[]>([]);
+  const [isExecuting, setIsExecuting] = useState(false);
+
+  const addStep = (command: string) => {
+    const newStep: AutomationStep = {
+      id: Date.now().toString(),
+      command,
+      generatedCode: '',
+      status: 'pending',
+      timestamp: new Date(),
+    };
+    setSteps(prev => [...prev, newStep]);
+    return newStep.id;
+  };
+
+  const updateStep = (id: string, updates: Partial<AutomationStep>) => {
+    setSteps(prev => prev.map(step => 
+      step.id === id ? { ...step, ...updates } : step
+    ));
+  };
+
+  const executeCommand = async (command: string) => {
+    if (isExecuting) return;
+    
+    setIsExecuting(true);
+    const stepId = addStep(command);
+
+    try {
+      // Simulate AI code generation
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      const generatedCode = generatePlaywrightCode(command);
+      updateStep(stepId, { 
+        generatedCode, 
+        status: 'executing' 
+      });
+
+      // Simulate code execution
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      updateStep(stepId, { 
+        status: 'success',
+        screenshot: '/placeholder.svg' // In real implementation, this would be a screenshot
+      });
+    } catch (error) {
+      updateStep(stepId, { 
+        status: 'error',
+        errorMessage: error instanceof Error ? error.message : 'Unknown error'
+      });
+    } finally {
+      setIsExecuting(false);
+    }
+  };
+
+  const generatePlaywrightCode = (command: string): string => {
+    const lowerCommand = command.toLowerCase();
+    
+    if (lowerCommand.includes('open website') || lowerCommand.includes('navigate to')) {
+      const urlMatch = command.match(/https?:\/\/[^\s]+/);
+      const url = urlMatch ? urlMatch[0] : 'https://example.com';
+      return `page.goto('${url}')`;
+    }
+    
+    if (lowerCommand.includes('enter') && lowerCommand.includes('phone')) {
+      const phoneMatch = command.match(/\d+/);
+      const phone = phoneMatch ? phoneMatch[0] : '1234567890';
+      return `page.fill('input[type="tel"], input[name*="phone"]', '${phone}')`;
+    }
+    
+    if (lowerCommand.includes('click') && lowerCommand.includes('button')) {
+      const buttonText = command.match(/click.*?(?:on\s+)?(.+?)\s+button/i)?.[1] || 'Submit';
+      return `page.click('button:has-text("${buttonText}")')`;
+    }
+    
+    if (lowerCommand.includes('otp')) {
+      const otpMatch = command.match(/\d{4,6}/);
+      const otp = otpMatch ? otpMatch[0] : '123456';
+      
+      if (lowerCommand.includes('box') || lowerCommand.includes('field')) {
+        return `# Multi-box OTP
+otp = "${otp}"
+inputs = page.query_selector_all('input[name*="otp"]')
+for i, digit in enumerate(otp):
+    if i < len(inputs):
+        inputs[i].fill(digit)`;
+      } else {
+        return `page.fill('input[name*="otp"]', '${otp}')`;
+      }
+    }
+    
+    return `# Generated code for: ${command}
+page.wait_for_timeout(1000)`;
+  };
+
+  return (
+    <div className="h-screen bg-background flex flex-col">
+      {/* Header */}
+      <header className="h-14 border-b border-border bg-card px-6 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
+            <Terminal className="w-4 h-4 text-primary-foreground" />
+          </div>
+          <div>
+            <h1 className="text-lg font-semibold">AI Browser Automation</h1>
+            <p className="text-xs text-muted-foreground">Natural language to Playwright</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <div className="flex items-center gap-1">
+            <div className={`w-2 h-2 rounded-full ${isExecuting ? 'bg-warning pulse-glow' : 'bg-success'}`} />
+            {isExecuting ? 'Executing' : 'Ready'}
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <div className="flex-1 overflow-hidden">
+        <ResizablePanelGroup direction="horizontal">
+          <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
+            <ChatPanel 
+              steps={steps}
+              onExecuteCommand={executeCommand}
+              isExecuting={isExecuting}
+            />
+          </ResizablePanel>
+          
+          <ResizableHandle withHandle />
+          
+          <ResizablePanel defaultSize={75}>
+            <BrowserPanel />
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      </div>
+    </div>
+  );
+};
+
+export default AutomationSystem;
