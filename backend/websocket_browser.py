@@ -20,21 +20,32 @@ class BrowserStreamManager:
 
     async def initialize_browser(self):
         """Initialize Playwright browser instance"""
-        if self.playwright is None:
-            self.playwright = await async_playwright().start()
-            self.browser = await self.playwright.chromium.launch(
-                headless=False,  # Set to True for headless mode
-                args=['--no-sandbox', '--disable-setuid-sandbox']
-            )
-            self.context = await self.browser.new_context(
-                viewport=self.current_viewport,
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            )
-            self.page = await self.context.new_page()
-            
-            # Enable console logging
-            self.page.on("console", lambda msg: logger.info(f"Browser console: {msg.text}"))
-            self.page.on("pageerror", lambda exc: logger.error(f"Browser error: {exc}"))
+        try:
+            if self.playwright is None:
+                self.playwright = await async_playwright().start()
+                self.browser = await self.playwright.chromium.launch(
+                    headless=False,  # Set to True for headless mode
+                    args=['--no-sandbox', '--disable-setuid-sandbox']
+                )
+                self.context = await self.browser.new_context(
+                    viewport=self.current_viewport,
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                )
+                self.page = await self.context.new_page()
+                
+                # Enable console logging
+                self.page.on("console", lambda msg: logger.info(f"Browser console: {msg.text}"))
+                self.page.on("pageerror", lambda exc: logger.error(f"Browser error: {exc}"))
+                logger.info("Browser initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize browser: {e}")
+            logger.error("Make sure to run 'playwright install' in the backend directory first")
+            # Send error to connected clients
+            await self.broadcast_message({
+                "type": "browser_error",
+                "data": {"message": f"Browser initialization failed: {str(e)}"}
+            })
+            raise e
 
     async def cleanup(self):
         """Clean up browser resources"""
