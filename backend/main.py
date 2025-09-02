@@ -176,9 +176,20 @@ async def execute_automation_command(command_id: int, command: str, generated_co
         conn.commit()
         
         # Execute the generated code
-        local_vars = {"page": page}
-        exec_code = compile(generated_code, "<string>", "exec")
-        await eval(exec_code, {"__builtins__": __builtins__, "page": page}, local_vars)
+        print(f"Executing code for command {command_id}:")
+        print(generated_code)
+        
+        # Create async execution context
+        async_code = f"""
+async def execute_command():
+{generated_code}
+
+await execute_command()
+"""
+        
+        # Execute the async code
+        exec_globals = {"__builtins__": __builtins__, "page": page}
+        exec(compile(async_code, "<string>", "exec"), exec_globals)
         
         # Take screenshot
         screenshot_path = await take_screenshot(command_id)
