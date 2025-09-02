@@ -49,6 +49,9 @@ def init_db():
 
 init_db()
 
+# Create screenshots directory
+os.makedirs("screenshots", exist_ok=True)
+
 # Pydantic models
 class AutomationCommand(BaseModel):
     command: str
