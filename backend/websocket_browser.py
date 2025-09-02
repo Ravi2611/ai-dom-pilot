@@ -1,32 +1,117 @@
 import asyncio
 import json
 import logging
-from typing import Dict, Set
+import os
+import shutil
+import sys
+from typing import Dict, Set, Optional
 from playwright.async_api import async_playwright, Browser, Page, BrowserContext
 from fastapi import WebSocket, WebSocketDisconnect
 import base64
 
 logger = logging.getLogger(__name__)
 
+def _find_chrome_executable() -> str:
+    """Return path to system-installed Chrome/Chromium or '' if not found."""
+    if sys.platform.startswith("darwin"):  # macOS
+        mac_paths = [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        ]
+        for p in mac_paths:
+            if os.path.exists(p):
+                return p
+        return ""
+
+    if sys.platform.startswith("win"):  # Windows
+        candidates = [
+            os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+            os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
+            os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe"),
+            os.path.expandvars(r"%ProgramFiles%\Chromium\Application\chrome.exe"),
+        ]
+        for p in candidates:
+            if os.path.exists(p):
+                return p
+        return ""
+
+    # Linux
+    for name in ("google-chrome-stable", "google-chrome", "chromium-browser", "chromium"):
+        p = shutil.which(name)
+        if p:
+            return p
+    return ""
+
+# Global shared browser instance
+_shared_browser: Optional[Browser] = None
+_shared_playwright = None
+
+async def get_shared_browser() -> Browser:
+    """Get or create the shared browser instance"""
+    global _shared_browser, _shared_playwright
+    
+    if _shared_browser and _shared_browser.is_connected():
+        return _shared_browser
+    
+    if _shared_playwright is None:
+        _shared_playwright = await async_playwright().start()
+    
+    # Try system Chrome first
+    try:
+        _shared_browser = await _shared_playwright.chromium.launch(
+            channel="chrome",  # Use system Chrome
+            headless=False,
+            args=['--no-sandbox', '--disable-setuid-sandbox']
+        )
+        logger.info("✅ Using system Chrome browser")
+        return _shared_browser
+    except Exception as e:
+        logger.warning(f"System Chrome not found, trying with executable path: {e}")
+        
+        # Fallback to detected Chrome path
+        chrome_path = _find_chrome_executable()
+        if chrome_path:
+            _shared_browser = await _shared_playwright.chromium.launch(
+                executable_path=chrome_path,
+                headless=False,
+                args=['--no-sandbox', '--disable-setuid-sandbox']
+            )
+            logger.info(f"✅ Using Chrome from: {chrome_path}")
+            return _shared_browser
+        else:
+            raise RuntimeError(
+                "Could not find Google Chrome. Please install Chrome or run 'playwright install' for bundled browser."
+            )
+
 class BrowserStreamManager:
     def __init__(self):
-        self.playwright = None
         self.browser: Browser = None
         self.context: BrowserContext = None
         self.page: Page = None
         self.active_connections: Set[WebSocket] = set()
         self.current_viewport = {"width": 1920, "height": 1080}
         self._lock = asyncio.Lock()
+        self._initialization_in_progress = False
 
     async def initialize_browser(self):
-        """Initialize Playwright browser instance"""
-        try:
-            if self.playwright is None:
-                self.playwright = await async_playwright().start()
-                self.browser = await self.playwright.chromium.launch(
-                    headless=False,  # Set to True for headless mode
-                    args=['--no-sandbox', '--disable-setuid-sandbox']
-                )
+        """Initialize browser using shared instance"""
+        async with self._lock:
+            # Prevent multiple initialization attempts
+            if self._initialization_in_progress:
+                while self._initialization_in_progress:
+                    await asyncio.sleep(0.1)
+                return
+            
+            # Reuse if already initialized and connected
+            if self.browser and self.browser.is_connected() and self.page:
+                return
+            
+            self._initialization_in_progress = True
+            
+            try:
+                # Use shared browser instance
+                self.browser = await get_shared_browser()
+                
                 self.context = await self.browser.new_context(
                     viewport=self.current_viewport,
                     user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -36,37 +121,45 @@ class BrowserStreamManager:
                 # Enable console logging
                 self.page.on("console", lambda msg: logger.info(f"Browser console: {msg.text}"))
                 self.page.on("pageerror", lambda exc: logger.error(f"Browser error: {exc}"))
-                logger.info("Browser initialized successfully")
-        except Exception as e:
-            logger.error(f"Failed to initialize browser: {e}")
-            logger.error("Make sure to run 'playwright install' in the backend directory first")
-            # Send error to connected clients
-            await self.broadcast_message({
-                "type": "browser_error",
-                "data": {"message": f"Browser initialization failed: {str(e)}"}
-            })
-            raise e
+                logger.info("Browser context initialized successfully")
+                
+            except Exception as e:
+                logger.error(f"Failed to initialize browser: {e}")
+                await self.broadcast_message({
+                    "type": "browser_error", 
+                    "data": {"message": f"Browser initialization failed: {str(e)}"}
+                })
+                raise e
+            finally:
+                self._initialization_in_progress = False
 
     async def cleanup(self):
-        """Clean up browser resources"""
-        if self.context:
-            await self.context.close()
-        if self.browser:
-            await self.browser.close()
-        if self.playwright:
-            await self.playwright.stop()
+        """Clean up browser resources (but keep shared browser alive)"""
+        try:
+            if self.context:
+                await self.context.close()
+        finally:
+            self.context = None
+            self.page = None
+            # Don't close shared browser - it will be reused
 
     async def connect_websocket(self, websocket: WebSocket):
         """Add a new WebSocket connection"""
         await websocket.accept()
         self.active_connections.add(websocket)
         
-        # Initialize browser if not already done
-        if self.browser is None:
-            await self.initialize_browser()
-        
-        # Send initial state
-        await self.send_frame_update()
+        try:
+            # Initialize browser if not ready
+            if not (self.browser and self.browser.is_connected() and self.page):
+                await self.initialize_browser()
+            # Send initial state
+            await self.send_frame_update()
+        except Exception as e:
+            logger.exception("Failed during WebSocket connect/initialize.")
+            await websocket.send_text(json.dumps({
+                "type": "browser_error",
+                "data": {"message": f"Browser initialization failed: {str(e)}"}
+            }))
 
     async def disconnect_websocket(self, websocket: WebSocket):
         """Remove a WebSocket connection"""
@@ -142,12 +235,12 @@ class BrowserStreamManager:
         """Navigate to a specific URL"""
         async with self._lock:
             try:
-                if not self.page:
+                if not (self.browser and self.browser.is_connected() and self.page):
                     await self.initialize_browser()
                 
                 if viewport and viewport != self.current_viewport:
                     self.current_viewport = viewport
-                    await self.page.set_viewport_size(viewport["width"], viewport["height"])
+                    await self.page.set_viewport_size(viewport)
                 
                 # Notify navigation start
                 await self.broadcast_message({
@@ -218,7 +311,7 @@ class BrowserStreamManager:
                 if viewport and viewport != self.current_viewport:
                     self.current_viewport = viewport
                     if self.page:
-                        await self.page.set_viewport_size(viewport["width"], viewport["height"])
+                        await self.page.set_viewport_size(viewport)
                 await self.send_frame_update()
             
             else:

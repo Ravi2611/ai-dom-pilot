@@ -14,7 +14,7 @@ from playwright.async_api import async_playwright
 from groq import Groq
 import re
 from bs4 import BeautifulSoup, Comment
-from websocket_browser import websocket_endpoint, browser_manager
+from websocket_browser import websocket_endpoint, browser_manager, get_shared_browser
 
 app = FastAPI(title="AI Browser Automation API")
 
@@ -165,11 +165,11 @@ async def execute_automation_command(command_id: int, command: str, generated_co
     conn = sqlite3.connect('automation.db')
     
     try:
-        # Initialize browser if not exists
+        # Use shared browser instance
         if not browser or not page:
-            playwright = await async_playwright().start()
-            browser = await playwright.chromium.launch(headless=False)
-            page = await browser.new_page()
+            browser = await get_shared_browser()
+            context = await browser.new_context()
+            page = await context.new_page()
         
         # Update status to running
         conn.execute("UPDATE commands SET status = 'running' WHERE id = ?", (command_id,))

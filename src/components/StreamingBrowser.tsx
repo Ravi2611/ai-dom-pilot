@@ -130,14 +130,18 @@ const StreamingBrowser = ({ currentUrl = '', onUrlChange }: StreamingBrowserProp
   }, [currentUrl]);
 
   useEffect(() => {
-    if (isConnected && !currentFrame) {
-      // Initialize browser session
-      sendMessage({
-        type: 'init_browser',
-        data: { viewport: getViewportSize() }
-      });
+    if (isConnected && !currentFrame && !isLoading) {
+      // Initialize browser session only once when connected
+      const initTimeout = setTimeout(() => {
+        sendMessage({
+          type: 'init_browser',
+          data: { viewport: getViewportSize() }
+        });
+      }, 500); // Small delay to prevent rapid initialization
+      
+      return () => clearTimeout(initTimeout);
     }
-  }, [isConnected]);
+  }, [isConnected, currentFrame, isLoading]);
 
   return (
     <div className="flex flex-col h-full bg-card border border-border rounded-lg overflow-hidden">

@@ -29,6 +29,11 @@ export const useWebSocket = (options: UseWebSocketOptions) => {
   const reconnectInterval = options.reconnectInterval ?? 3000;
 
   const connect = useCallback(() => {
+    // Prevent multiple connection attempts
+    if (wsRef.current?.readyState === WebSocket.CONNECTING) {
+      return;
+    }
+    
     try {
       setConnectionError(null);
       wsRef.current = new WebSocket(options.url, options.protocols);
@@ -53,7 +58,8 @@ export const useWebSocket = (options: UseWebSocketOptions) => {
         setIsConnected(false);
         options.onClose?.(event);
 
-        if (!event.wasClean && reconnectAttemptsRef.current < maxReconnectAttempts) {
+        // Only reconnect if connection was established and lost unexpectedly
+        if (!event.wasClean && event.code !== 1000 && reconnectAttemptsRef.current < maxReconnectAttempts) {
           reconnectAttemptsRef.current++;
           reconnectTimeoutRef.current = setTimeout(() => {
             connect();
@@ -69,7 +75,7 @@ export const useWebSocket = (options: UseWebSocketOptions) => {
       setConnectionError('Failed to create WebSocket connection');
       console.error('WebSocket connection error:', error);
     }
-  }, [options, maxReconnectAttempts, reconnectInterval]);
+  }, [options.url, options.protocols, maxReconnectAttempts, reconnectInterval]);
 
   const disconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {
