@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -14,6 +14,7 @@ from playwright.async_api import async_playwright
 from groq import Groq
 import re
 from bs4 import BeautifulSoup, Comment
+from websocket_browser import websocket_endpoint, browser_manager
 
 app = FastAPI(title="AI Browser Automation API")
 
@@ -324,6 +325,11 @@ async def get_current_dom():
             return {"dom": "", "error": str(e)}
     return {"dom": ""}
 
+# WebSocket endpoint for browser streaming
+@app.websocket("/ws/browser")
+async def websocket_browser_endpoint(websocket: WebSocket):
+    await websocket_endpoint(websocket)
+
 # Serve screenshots
 app.mount("/screenshots", StaticFiles(directory="screenshots"), name="screenshots")
 
@@ -331,6 +337,7 @@ app.mount("/screenshots", StaticFiles(directory="screenshots"), name="screenshot
 async def shutdown_event():
     """Clean up browser on shutdown"""
     global browser
+    await browser_manager.cleanup()
     if browser:
         await browser.close()
 

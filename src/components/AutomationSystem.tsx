@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ChatPanel } from './ChatPanel';
-import { BrowserPanel } from './BrowserPanel';
+import StreamingBrowser from './StreamingBrowser';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { Terminal, Globe } from 'lucide-react';
 
@@ -148,7 +148,7 @@ page.wait_for_timeout(1000)`;
           <ResizableHandle withHandle />
           
           <ResizablePanel defaultSize={75}>
-            <BrowserPanel 
+            <StreamingBrowser 
               currentUrl={currentUrl}
               onUrlChange={setCurrentUrl}
             />
