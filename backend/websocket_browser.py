@@ -91,10 +91,18 @@ class BrowserStreamManager:
         self.page: Page = None
         self.active_connections: Set[WebSocket] = set()
         self.current_viewport = {"width": 1920, "height": 1080}
+        self.current_view_mode = "desktop"
         self._lock = asyncio.Lock()
         self._initialization_in_progress = False
         self._screenshot_task: Optional[asyncio.Task] = None
         self._screenshot_running = False
+        
+        # Mobile user agents for different devices
+        self.user_agents = {
+            "desktop": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "tablet": "Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+            "mobile": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+        }
         
         # Ensure screenshots directory exists
         self.screenshots_dir = Path("screenshots")
@@ -121,7 +129,7 @@ class BrowserStreamManager:
                 
                 self.context = await self.browser.new_context(
                     viewport=self.current_viewport,
-                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                    user_agent=self.user_agents[self.current_view_mode]
                 )
                 self.page = await self.context.new_page()
                 
@@ -301,17 +309,25 @@ class BrowserStreamManager:
 
     async def _screenshot_loop(self):
         """Periodic screenshot capture loop"""
+        logger.info("Screenshot loop started")
         while self._screenshot_running and self.active_connections:
             try:
-                if self.page:
+                if self.page and self.page.url != "about:blank":
+                    logger.debug(f"Taking screenshot for URL: {self.page.url}")
                     screenshot_b64 = await self.take_screenshot()
                     if screenshot_b64:
                         await self.send_frame_update_with_screenshot(screenshot_b64)
+                        logger.debug("Screenshot sent to clients")
+                    else:
+                        logger.warning("Failed to take screenshot")
+                else:
+                    logger.debug("Page not ready for screenshot")
                 
                 # Wait 1 second before next screenshot
                 await asyncio.sleep(1.0)
                 
             except asyncio.CancelledError:
+                logger.info("Screenshot loop cancelled")
                 break
             except Exception as e:
                 logger.error(f"Error in screenshot loop: {e}")
@@ -372,6 +388,7 @@ class BrowserStreamManager:
                 if viewport and viewport != self.current_viewport:
                     self.current_viewport = viewport
                     await self.page.set_viewport_size(viewport)
+                    logger.info(f"Updated viewport to: {viewport}")
                 
                 # Notify navigation start
                 await self.broadcast_message({
@@ -379,11 +396,15 @@ class BrowserStreamManager:
                     "data": {"url": url}
                 })
                 
+                logger.info(f"Navigating to URL: {url} with user agent: {self.user_agents[self.current_view_mode]}")
+                
                 # Navigate to URL
                 await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
                 
                 # Wait a bit for dynamic content
                 await asyncio.sleep(1)
+                
+                logger.info(f"Navigation completed. Current URL: {self.page.url}")
                 
                 # Notify URL change
                 await self.broadcast_message({
@@ -391,12 +412,14 @@ class BrowserStreamManager:
                     "data": {"url": self.page.url}
                 })
                 
-                # Take screenshot after navigation and send frame update
+                # Force immediate screenshot after navigation
                 screenshot_b64 = await self.take_screenshot()
                 if screenshot_b64:
                     await self.send_frame_update_with_screenshot(screenshot_b64)
+                    logger.info("Screenshot sent after navigation")
                 else:
                     await self.send_frame_update()
+                    logger.warning("Failed to take screenshot after navigation")
                 
             except Exception as e:
                 logger.error(f"Error navigating to {url}: {e}")
@@ -451,11 +474,45 @@ class BrowserStreamManager:
             
             elif message_type == "change_viewport":
                 viewport = data.get("viewport")
+                view_mode = data.get("view_mode", "desktop")
+                
                 if viewport and viewport != self.current_viewport:
                     self.current_viewport = viewport
+                    old_view_mode = self.current_view_mode
+                    self.current_view_mode = view_mode
+                    
+                    logger.info(f"Changing viewport from {old_view_mode} to {view_mode}: {viewport}")
+                    
                     if self.page:
+                        # Update viewport size
                         await self.page.set_viewport_size(viewport)
-                        # Take a new screenshot with updated viewport
+                        
+                        # Update user agent if view mode changed
+                        if old_view_mode != view_mode:
+                            new_user_agent = self.user_agents[view_mode]
+                            logger.info(f"Updating user agent to: {new_user_agent}")
+                            
+                            # For mobile/tablet, we need to recreate context with new user agent
+                            current_url = self.page.url
+                            await self.context.close()
+                            
+                            self.context = await self.browser.new_context(
+                                viewport=viewport,
+                                user_agent=new_user_agent
+                            )
+                            self.page = await self.context.new_page()
+                            
+                            # Re-enable console logging
+                            self.page.on("console", lambda msg: logger.info(f"Browser console: {msg.text}"))
+                            self.page.on("pageerror", lambda exc: logger.error(f"Browser error: {exc}"))
+                            
+                            # Navigate back to the same URL if it's not about:blank
+                            if current_url and current_url != "about:blank":
+                                await self.page.goto(current_url, wait_until="domcontentloaded")
+                                await asyncio.sleep(1)  # Wait for mobile rendering
+                        
+                        # Force immediate screenshot with new viewport
+                        # Force immediate screenshot with new viewport
                         screenshot_b64 = await self.take_screenshot()
                         if screenshot_b64:
                             await self.send_frame_update_with_screenshot(screenshot_b64)

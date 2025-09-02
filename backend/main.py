@@ -203,11 +203,16 @@ async def execute_command():
         # Take screenshot
         screenshot_path = await take_screenshot(command_id)
         
-        # Trigger screenshot update in WebSocket stream
+        # Force immediate screenshot update in WebSocket stream
         if browser_manager.active_connections:
             screenshot_b64 = await browser_manager.take_screenshot()
             if screenshot_b64:
                 await browser_manager.send_frame_update_with_screenshot(screenshot_b64)
+                print(f"✅ Screenshot updated after command {command_id}")
+            else:
+                print(f"⚠️ Failed to take screenshot after command {command_id}")
+        else:
+            print(f"ℹ️ No active WebSocket connections for command {command_id}")
         
         # Update status to success
         conn.execute(

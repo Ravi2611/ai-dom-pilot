@@ -116,7 +116,10 @@ const StreamingBrowser = ({ currentUrl = '', onUrlChange }: StreamingBrowserProp
     // Send viewport change message to backend immediately
     sendMessage({
       type: 'change_viewport',
-      data: { viewport: getViewportSizeForMode(newMode) }
+      data: { 
+        viewport: getViewportSizeForMode(newMode),
+        view_mode: newMode 
+      }
     });
   };
 
