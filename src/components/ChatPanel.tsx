@@ -178,10 +178,10 @@ export const ChatPanel = ({ steps, onExecuteCommand, isExecuting }: ChatPanelPro
           <p className="text-xs text-muted-foreground mb-2">Example commands:</p>
           <div className="flex flex-wrap gap-1">
             {[
-              'Open website https://example.com',
-              'Enter mobile number 1234567890',
-              'Click on Submit button',
-              'Enter OTP 123456'
+              'Open m.domino.co.in',
+              'Go to google.com',
+              'Navigate to amazon.in',
+              'Enter mobile number 1234567890'
             ].map((example) => (
               <Button
                 key={example}

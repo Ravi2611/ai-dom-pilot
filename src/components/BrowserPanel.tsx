@@ -15,13 +15,21 @@ import {
   Settings
 } from 'lucide-react';
 
-export const BrowserPanel = () => {
-  const [url, setUrl] = useState('https://m.domino.co.in');
+interface BrowserPanelProps {
+  currentUrl?: string;
+  onUrlChange?: (url: string) => void;
+}
+
+export const BrowserPanel = ({ currentUrl = '', onUrlChange }: BrowserPanelProps) => {
+  const [url, setUrl] = useState(currentUrl);
   const [isLoading, setIsLoading] = useState(false);
   const [viewMode, setViewMode] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
 
-  const handleNavigate = async () => {
+  const handleNavigate = async (newUrl?: string) => {
+    const targetUrl = newUrl || url;
     setIsLoading(true);
+    setUrl(targetUrl);
+    onUrlChange?.(targetUrl);
     // Simulate navigation
     await new Promise(resolve => setTimeout(resolve, 1500));
     setIsLoading(false);
@@ -65,7 +73,7 @@ export const BrowserPanel = () => {
             <Button 
               variant="outline" 
               size="sm" 
-              onClick={handleNavigate}
+              onClick={() => handleNavigate()}
               disabled={isLoading}
             >
               {isLoading ? (
@@ -91,7 +99,7 @@ export const BrowserPanel = () => {
                 placeholder="Enter URL..."
               />
             </div>
-            <Button onClick={handleNavigate} disabled={isLoading}>
+            <Button onClick={() => handleNavigate()} disabled={isLoading}>
               Go
             </Button>
           </div>

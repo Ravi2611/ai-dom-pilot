@@ -17,6 +17,7 @@ export interface AutomationStep {
 const AutomationSystem = () => {
   const [steps, setSteps] = useState<AutomationStep[]>([]);
   const [isExecuting, setIsExecuting] = useState(false);
+  const [currentUrl, setCurrentUrl] = useState('');
 
   const addStep = (command: string) => {
     const newStep: AutomationStep = {
@@ -72,10 +73,13 @@ const AutomationSystem = () => {
   const generatePlaywrightCode = (command: string): string => {
     const lowerCommand = command.toLowerCase();
     
-    if (lowerCommand.includes('open website') || lowerCommand.includes('navigate to')) {
-      const urlMatch = command.match(/https?:\/\/[^\s]+/);
-      const url = urlMatch ? urlMatch[0] : 'https://example.com';
-      return `page.goto('${url}')`;
+    if (lowerCommand.includes('open') || lowerCommand.includes('navigate') || lowerCommand.includes('go to')) {
+      const urlMatch = command.match(/https?:\/\/[^\s]+/) || command.match(/[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+      if (urlMatch) {
+        const url = urlMatch[0].startsWith('http') ? urlMatch[0] : `https://${urlMatch[0]}`;
+        setCurrentUrl(url);
+        return `page.goto('${url}')`;
+      }
     }
     
     if (lowerCommand.includes('enter') && lowerCommand.includes('phone')) {
@@ -144,7 +148,10 @@ page.wait_for_timeout(1000)`;
           <ResizableHandle withHandle />
           
           <ResizablePanel defaultSize={75}>
-            <BrowserPanel />
+            <BrowserPanel 
+              currentUrl={currentUrl}
+              onUrlChange={setCurrentUrl}
+            />
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
