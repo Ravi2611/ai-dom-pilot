@@ -130,10 +130,12 @@ export const ChatPanel = ({ steps, onExecuteCommand, isExecuting }: ChatPanelPro
                       <Image className="w-3 h-3 text-muted-foreground" />
                       <span className="text-xs text-muted-foreground">Screenshot</span>
                     </div>
-                    <div className="bg-muted rounded-lg p-2 text-center">
-                      <div className="w-full h-20 bg-secondary rounded flex items-center justify-center">
-                        <Image className="w-6 h-6 text-muted-foreground" />
-                      </div>
+                    <div className="bg-muted rounded-lg p-2">
+                      <img 
+                        src={step.screenshot} 
+                        alt="Screenshot" 
+                        className="w-full rounded border border-border" 
+                      />
                     </div>
                   </div>
                 )}

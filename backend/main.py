@@ -16,8 +16,19 @@ import re
 import textwrap
 from bs4 import BeautifulSoup, Comment
 from websocket_browser import websocket_endpoint, browser_manager, get_shared_browser
+from contextlib import asynccontextmanager
 
-app = FastAPI(title="AI Browser Automation API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    yield
+    # Shutdown
+    global browser
+    await browser_manager.cleanup()
+    if browser:
+        await browser.close()
+
+app = FastAPI(title="AI Browser Automation API", lifespan=lifespan)
 
 # CORS middleware
 app.add_middleware(
@@ -362,19 +373,12 @@ async def reset_browser():
         
         return {"status": "success", "message": "Browser and automation state reset successfully"}
     except Exception as e:
-        logger.error(f"Error resetting automation: {e}")
+        print(f"Error resetting automation: {e}")
         raise HTTPException(status_code=500, detail=f"Reset failed: {str(e)}")
 
 # Serve screenshots
 app.mount("/screenshots", StaticFiles(directory="screenshots"), name="screenshots")
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Clean up browser on shutdown"""
-    global browser
-    await browser_manager.cleanup()
-    if browser:
-        await browser.close()
 
 if __name__ == "__main__":
     import uvicorn

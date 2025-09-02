@@ -449,6 +449,19 @@ class BrowserStreamManager:
                         await self.page.set_viewport_size(viewport)
                 await self.send_frame_update()
             
+            elif message_type == "change_viewport":
+                viewport = data.get("viewport")
+                if viewport and viewport != self.current_viewport:
+                    self.current_viewport = viewport
+                    if self.page:
+                        await self.page.set_viewport_size(viewport)
+                        # Take a new screenshot with updated viewport
+                        screenshot_b64 = await self.take_screenshot()
+                        if screenshot_b64:
+                            await self.send_frame_update_with_screenshot(screenshot_b64)
+                        else:
+                            await self.send_frame_update()
+            
             elif message_type == "reset_browser":
                 await self.reset_browser()
             

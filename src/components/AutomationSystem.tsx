@@ -41,7 +41,7 @@ const AutomationSystem = () => {
   const resetSystem = async () => {
     try {
       // Send reset message to backend
-      const response = await fetch('/api/automation/reset', { method: 'POST' });
+      const response = await fetch('http://localhost:8000/api/automation/reset', { method: 'POST' });
       if (response.ok) {
         // Clear local state
         setSteps([]);
@@ -110,14 +110,14 @@ const AutomationSystem = () => {
       const maxAttempts = 30; // 30 seconds max wait
       
       while (attempts < maxAttempts) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, 2000));
         
         const statusResponse = await fetch(`http://localhost:8000/api/automation/command/${commandId}`);
         if (!statusResponse.ok) break;
         
         const statusData = await statusResponse.json();
         
-        if (statusData.status === 'completed') {
+        if (statusData.status === 'success') {
           updateStep(stepId, { 
             status: 'success',
             screenshot: statusData.screenshot_url ? `http://localhost:8000${statusData.screenshot_url}` : undefined
@@ -163,10 +163,10 @@ const AutomationSystem = () => {
       }
     }
     
-    if (lowerCommand.includes('enter') && lowerCommand.includes('phone')) {
+    if (lowerCommand.includes('enter') && (lowerCommand.includes('phone') || lowerCommand.includes('mobile'))) {
       const phoneMatch = command.match(/\d+/);
       const phone = phoneMatch ? phoneMatch[0] : '1234567890';
-      return `page.fill('input[type="tel"], input[name*="phone"]', '${phone}')`;
+      return `page.fill('input[type="tel"], input[name*="phone"], input[name*="mobile"], input[id*="mobile"]', '${phone}')`;
     }
     
     if (lowerCommand.includes('click') && lowerCommand.includes('button')) {

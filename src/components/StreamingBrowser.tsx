@@ -111,6 +111,26 @@ const StreamingBrowser = ({ currentUrl = '', onUrlChange }: StreamingBrowserProp
     }
   };
 
+  const handleViewModeChange = (newMode: ViewMode) => {
+    setViewMode(newMode);
+    // Send viewport change message to backend immediately
+    sendMessage({
+      type: 'change_viewport',
+      data: { viewport: getViewportSizeForMode(newMode) }
+    });
+  };
+
+  const getViewportSizeForMode = (mode: ViewMode) => {
+    switch (mode) {
+      case 'mobile':
+        return { width: 375, height: 812 };
+      case 'tablet':
+        return { width: 768, height: 1024 };
+      default:
+        return { width: 1920, height: 1080 };
+    }
+  };
+
   const handleRefresh = () => {
     if (currentFrame?.url) {
       handleNavigate(currentFrame.url);
@@ -240,7 +260,7 @@ const StreamingBrowser = ({ currentUrl = '', onUrlChange }: StreamingBrowserProp
                 key={mode}
                 variant={viewMode === mode ? "default" : "ghost"}
                 size="sm"
-                onClick={() => setViewMode(mode)}
+                onClick={() => handleViewModeChange(mode)}
                 className="w-8 h-8 p-0"
               >
                 <Icon className="w-4 h-4" />
