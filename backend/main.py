@@ -13,6 +13,7 @@ import traceback
 from playwright.async_api import async_playwright
 from groq import Groq
 import re
+import textwrap
 from bs4 import BeautifulSoup, Comment
 from websocket_browser import websocket_endpoint, browser_manager, get_shared_browser
 
@@ -182,7 +183,7 @@ async def execute_automation_command(command_id: int, command: str, generated_co
         # Create async execution context
         async_code = f"""
 async def execute_command():
-{generated_code}
+{textwrap.indent(generated_code, '    ')}
 
 await execute_command()
 """
