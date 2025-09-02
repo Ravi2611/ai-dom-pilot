@@ -8,6 +8,7 @@ from typing import Dict, Set, Optional
 from playwright.async_api import async_playwright, Browser, Page, BrowserContext
 from fastapi import WebSocket, WebSocketDisconnect
 import base64
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,12 @@ class BrowserStreamManager:
         self.current_viewport = {"width": 1920, "height": 1080}
         self._lock = asyncio.Lock()
         self._initialization_in_progress = False
+        self._screenshot_task: Optional[asyncio.Task] = None
+        self._screenshot_running = False
+        
+        # Ensure screenshots directory exists
+        self.screenshots_dir = Path("screenshots")
+        self.screenshots_dir.mkdir(exist_ok=True)
 
     async def initialize_browser(self):
         """Initialize browser using shared instance"""
@@ -136,11 +143,21 @@ class BrowserStreamManager:
     async def cleanup(self):
         """Clean up browser resources (but keep shared browser alive)"""
         try:
+            # Stop screenshot streaming
+            if self._screenshot_task and not self._screenshot_task.done():
+                self._screenshot_task.cancel()
+                try:
+                    await self._screenshot_task
+                except asyncio.CancelledError:
+                    pass
+            self._screenshot_running = False
+            
             if self.context:
                 await self.context.close()
         finally:
             self.context = None
             self.page = None
+            self._screenshot_task = None
             # Don't close shared browser - it will be reused
 
     async def reset_browser(self):
@@ -168,6 +185,11 @@ class BrowserStreamManager:
             # Initialize browser if not ready
             if not (self.browser and self.browser.is_connected() and self.page):
                 await self.initialize_browser()
+            
+            # Start screenshot streaming if not already running
+            if not self._screenshot_running:
+                await self.start_screenshot_streaming()
+            
             # Send initial state
             await self.send_frame_update()
         except Exception as e:
@@ -180,6 +202,10 @@ class BrowserStreamManager:
     async def disconnect_websocket(self, websocket: WebSocket):
         """Remove a WebSocket connection"""
         self.active_connections.discard(websocket)
+        
+        # Stop screenshot streaming if no connections left
+        if not self.active_connections and self._screenshot_running:
+            await self.stop_screenshot_streaming()
 
     async def broadcast_message(self, message: dict):
         """Send message to all connected clients"""
@@ -222,6 +248,97 @@ class BrowserStreamManager:
         except Exception as e:
             logger.error(f"Error getting page content: {e}")
             return f"<html><body><h1>Error loading page: {str(e)}</h1></body></html>"
+
+    async def take_screenshot(self) -> Optional[str]:
+        """Take a screenshot and return base64 encoded data"""
+        if not self.page:
+            return None
+            
+        try:
+            # Take screenshot
+            screenshot_bytes = await self.page.screenshot(
+                type='jpeg',
+                quality=80,
+                full_page=False
+            )
+            
+            # Convert to base64
+            screenshot_b64 = base64.b64encode(screenshot_bytes).decode('utf-8')
+            
+            # Save to file with timestamp
+            timestamp = int(asyncio.get_event_loop().time() * 1000)
+            filename = f"screenshot_{timestamp}.jpg"
+            filepath = self.screenshots_dir / filename
+            
+            with open(filepath, 'wb') as f:
+                f.write(screenshot_bytes)
+                
+            return screenshot_b64
+            
+        except Exception as e:
+            logger.error(f"Error taking screenshot: {e}")
+            return None
+
+    async def start_screenshot_streaming(self):
+        """Start periodic screenshot streaming"""
+        if self._screenshot_running:
+            return
+            
+        self._screenshot_running = True
+        self._screenshot_task = asyncio.create_task(self._screenshot_loop())
+        logger.info("Started screenshot streaming")
+
+    async def stop_screenshot_streaming(self):
+        """Stop screenshot streaming"""
+        self._screenshot_running = False
+        if self._screenshot_task and not self._screenshot_task.done():
+            self._screenshot_task.cancel()
+            try:
+                await self._screenshot_task
+            except asyncio.CancelledError:
+                pass
+        logger.info("Stopped screenshot streaming")
+
+    async def _screenshot_loop(self):
+        """Periodic screenshot capture loop"""
+        while self._screenshot_running and self.active_connections:
+            try:
+                if self.page:
+                    screenshot_b64 = await self.take_screenshot()
+                    if screenshot_b64:
+                        await self.send_frame_update_with_screenshot(screenshot_b64)
+                
+                # Wait 1 second before next screenshot
+                await asyncio.sleep(1.0)
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in screenshot loop: {e}")
+                await asyncio.sleep(1.0)
+
+    async def send_frame_update_with_screenshot(self, screenshot_b64: str):
+        """Send current page state with screenshot to all connected clients"""
+        if not self.page:
+            return
+            
+        try:
+            title = await self.page.title()
+            url = self.page.url
+            
+            frame_data = {
+                "url": url,
+                "title": title,
+                "timestamp": asyncio.get_event_loop().time() * 1000,
+                "screenshot": screenshot_b64
+            }
+            
+            await self.broadcast_message({
+                "type": "browser_frame",
+                "data": frame_data
+            })
+        except Exception as e:
+            logger.error(f"Error sending frame update with screenshot: {e}")
 
     async def send_frame_update(self):
         """Send current page state to all connected clients (URL and title only)"""
@@ -274,8 +391,12 @@ class BrowserStreamManager:
                     "data": {"url": self.page.url}
                 })
                 
-                # Send updated frame
-                await self.send_frame_update()
+                # Take screenshot after navigation and send frame update
+                screenshot_b64 = await self.take_screenshot()
+                if screenshot_b64:
+                    await self.send_frame_update_with_screenshot(screenshot_b64)
+                else:
+                    await self.send_frame_update()
                 
             except Exception as e:
                 logger.error(f"Error navigating to {url}: {e}")

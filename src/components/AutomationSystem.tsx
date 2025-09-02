@@ -79,22 +79,68 @@ const AutomationSystem = () => {
     const stepId = addStep(command);
 
     try {
-      // Simulate AI code generation
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
+      // Generate code first
       const generatedCode = generatePlaywrightCode(command);
       updateStep(stepId, { 
         generatedCode, 
         status: 'executing' 
       });
 
-      // Simulate code execution
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      updateStep(stepId, { 
-        status: 'success',
-        screenshot: '/placeholder.svg' // In real implementation, this would be a screenshot
+      // Send command to real automation API
+      const response = await fetch('http://localhost:8000/api/automation/command', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          command: command,
+          dom: '' // Could be enhanced with current DOM
+        }),
       });
+
+      if (!response.ok) {
+        throw new Error(`API Error: ${response.status}`);
+      }
+
+      const result = await response.json();
+      const commandId = result.id;
+
+      // Poll for completion and screenshot
+      let attempts = 0;
+      const maxAttempts = 30; // 30 seconds max wait
+      
+      while (attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        const statusResponse = await fetch(`http://localhost:8000/api/automation/command/${commandId}`);
+        if (!statusResponse.ok) break;
+        
+        const statusData = await statusResponse.json();
+        
+        if (statusData.status === 'completed') {
+          updateStep(stepId, { 
+            status: 'success',
+            screenshot: statusData.screenshot_url ? `http://localhost:8000${statusData.screenshot_url}` : undefined
+          });
+          break;
+        } else if (statusData.status === 'error') {
+          updateStep(stepId, { 
+            status: 'error',
+            errorMessage: statusData.error || 'Command execution failed'
+          });
+          break;
+        }
+        
+        attempts++;
+      }
+      
+      if (attempts >= maxAttempts) {
+        updateStep(stepId, { 
+          status: 'error',
+          errorMessage: 'Command execution timeout'
+        });
+      }
+      
     } catch (error) {
       updateStep(stepId, { 
         status: 'error',

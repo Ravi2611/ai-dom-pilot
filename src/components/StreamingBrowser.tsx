@@ -29,6 +29,7 @@ interface BrowserFrame {
   url: string;
   title: string;
   timestamp: number;
+  screenshot?: string;
 }
 
 const StreamingBrowser = ({ currentUrl = '', onUrlChange }: StreamingBrowserProps) => {
@@ -290,26 +291,41 @@ const StreamingBrowser = ({ currentUrl = '', onUrlChange }: StreamingBrowserProp
         ) : (
           <div 
             ref={frameRef}
-            className={`w-full h-full ${getViewportClass()} mx-auto bg-background border border-border rounded-lg overflow-hidden`}
+            className={`w-full h-full ${getViewportClass()} mx-auto bg-background border border-border rounded-lg overflow-hidden relative`}
           >
             {isLoading && (
               <div className="absolute inset-0 bg-background/80 flex items-center justify-center z-10">
                 <RefreshCw className="w-8 h-8 animate-spin text-primary" />
               </div>
             )}
-            <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center">
-              <Globe className="w-16 h-16 text-primary mb-4" />
-              <h3 className="text-xl font-semibold text-foreground mb-2">Browser Running</h3>
-              <p className="text-muted-foreground mb-4 max-w-md">
-                The browser is running in the background. Your automation commands will work here, 
-                but the page content is not displayed to avoid conflicts.
-              </p>
-              <div className="space-y-2 text-sm text-muted-foreground">
-                <p><strong>Current URL:</strong> {currentFrame.url}</p>
-                <p><strong>Page Title:</strong> {currentFrame.title}</p>
-                <p><strong>Status:</strong> Ready for automation</p>
+            
+            {currentFrame.screenshot ? (
+              <div className="w-full h-full bg-white">
+                <img 
+                  src={`data:image/jpeg;base64,${currentFrame.screenshot}`}
+                  alt="Browser screenshot"
+                  className="w-full h-full object-contain"
+                  style={{
+                    maxWidth: '100%',
+                    maxHeight: '100%',
+                    display: 'block'
+                  }}
+                />
               </div>
-            </div>
+            ) : (
+              <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center">
+                <Globe className="w-16 h-16 text-primary mb-4" />
+                <h3 className="text-xl font-semibold text-foreground mb-2">Browser Starting</h3>
+                <p className="text-muted-foreground mb-4 max-w-md">
+                  Loading browser content... Screenshots will appear shortly.
+                </p>
+                <div className="space-y-2 text-sm text-muted-foreground">
+                  <p><strong>Current URL:</strong> {currentFrame.url}</p>
+                  <p><strong>Page Title:</strong> {currentFrame.title}</p>
+                  <p><strong>Status:</strong> Loading screenshots</p>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
