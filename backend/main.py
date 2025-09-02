@@ -184,13 +184,15 @@ async def execute_automation_command(command_id: int, command: str, generated_co
         async_code = f"""
 async def execute_command():
 {textwrap.indent(generated_code, '    ')}
-
-await execute_command()
 """
         
-        # Execute the async code
+        # Execute the async code to define the function
         exec_globals = {"__builtins__": __builtins__, "page": page}
         exec(compile(async_code, "<string>", "exec"), exec_globals)
+        
+        # Get the function and execute it in our async context
+        execute_command = exec_globals['execute_command']
+        await execute_command()
         
         # Take screenshot
         screenshot_path = await take_screenshot(command_id)
