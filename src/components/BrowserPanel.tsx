@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 
 export const BrowserPanel = () => {
-  const [url, setUrl] = useState('https://example.com');
+  const [url, setUrl] = useState('https://m.domino.co.in');
   const [isLoading, setIsLoading] = useState(false);
   const [viewMode, setViewMode] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
 
@@ -155,40 +155,21 @@ export const BrowserPanel = () => {
               </div>
 
               {/* Page Content */}
-              <div className="flex-1 p-8 flex items-center justify-center">
+              <div className="flex-1 overflow-hidden">
                 {isLoading ? (
-                  <div className="text-center">
-                    <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                    <p className="text-muted-foreground">Loading page...</p>
+                  <div className="h-full flex items-center justify-center">
+                    <div className="text-center">
+                      <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                      <p className="text-muted-foreground">Loading page...</p>
+                    </div>
                   </div>
                 ) : (
-                  <div className="text-center max-w-md">
-                    <div className="w-24 h-24 bg-gradient-to-br from-primary to-accent rounded-2xl flex items-center justify-center mx-auto mb-6">
-                      <Globe className="w-12 h-12 text-white" />
-                    </div>
-                    <h1 className="text-2xl font-bold mb-4 text-gray-900 dark:text-white">
-                      Browser Mirror
-                    </h1>
-                    <p className="text-gray-600 dark:text-gray-300 mb-6">
-                      This panel will show the live browser state during automation. 
-                      Use the chat panel to execute commands and see them reflected here in real-time.
-                    </p>
-                    <div className="grid grid-cols-1 gap-3">
-                      <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 text-left">
-                        <h3 className="font-medium text-gray-900 dark:text-white mb-2">Sample Elements</h3>
-                        <div className="space-y-2">
-                          <input 
-                            type="text" 
-                            placeholder="Phone number input"
-                            className="w-full px-3 py-2 border rounded text-sm"
-                          />
-                          <button className="w-full bg-primary text-primary-foreground py-2 rounded text-sm">
-                            Ask Later Button
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                  <iframe
+                    src={url}
+                    className="w-full h-full border-0"
+                    title="Browser Content"
+                    sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
+                  />
                 )}
               </div>
             </div>
