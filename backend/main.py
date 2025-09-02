@@ -23,10 +23,7 @@ async def lifespan(app: FastAPI):
     # Startup
     yield
     # Shutdown
-    global browser
     await browser_manager.cleanup()
-    if browser:
-        await browser.close()
 
 app = FastAPI(title="AI Browser Automation API", lifespan=lifespan)
 
@@ -78,9 +75,7 @@ class CommandResponse(BaseModel):
     error_message: Optional[str] = None
     created_at: str
 
-# Global browser instance
-browser = None
-page = None
+# Global browser instance (removed - now using browser_manager)
 
 def shrink_dom(dom: str) -> str:
     """Compress DOM by keeping only actionable elements"""
@@ -96,8 +91,8 @@ def shrink_dom(dom: str) -> str:
         comment.extract()
     
     # Keep only actionable elements
-    form_elements = soup.find_all(["form", "input", "button", "a", "select", "textarea", "div", "span"])
-    return "\n".join(str(el) for el in form_elements[:50])  # Limit to first 50 elements
+    form_elements = soup.find_all(["form", "input", "button", "a", "select", "textarea"])
+    return "\n".join(str(el) for el in form_elements)
 
 def ai_to_code(command: str, dom: str = "") -> str:
     """Convert natural language + DOM into runnable Playwright code"""
@@ -164,24 +159,24 @@ async def take_screenshot(command_id: int) -> str:
     try:
         os.makedirs("screenshots", exist_ok=True)
         screenshot_path = f"screenshots/step_{command_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-        await page.screenshot(path=screenshot_path)
-        return screenshot_path
+        
+        # Use browser_manager.page for screenshot
+        if browser_manager.page:
+            await browser_manager.page.screenshot(path=screenshot_path)
+            return screenshot_path
+        return ""
     except Exception as e:
         print(f"Screenshot error: {e}")
         return ""
 
 async def execute_automation_command(command_id: int, command: str, generated_code: str):
     """Execute the automation command in background"""
-    global page, browser
-    
     conn = sqlite3.connect('automation.db')
     
     try:
-        # Use shared browser instance
-        if not browser or not page:
-            browser = await get_shared_browser()
-            context = await browser.new_context()
-            page = await context.new_page()
+        # Initialize browser through browser_manager if needed
+        if not (browser_manager.browser and browser_manager.browser.is_connected() and browser_manager.page):
+            await browser_manager.initialize_browser()
         
         # Update status to running
         conn.execute("UPDATE commands SET status = 'running' WHERE id = ?", (command_id,))
@@ -191,14 +186,14 @@ async def execute_automation_command(command_id: int, command: str, generated_co
         print(f"Executing code for command {command_id}:")
         print(generated_code)
         
-        # Create async execution context
+        # Create async execution context using browser_manager.page
         async_code = f"""
 async def execute_command():
 {textwrap.indent(generated_code, '    ')}
 """
         
         # Execute the async code to define the function
-        exec_globals = {"__builtins__": __builtins__, "page": page}
+        exec_globals = {"__builtins__": __builtins__, "page": browser_manager.page}
         exec(compile(async_code, "<string>", "exec"), exec_globals)
         
         # Get the function and execute it in our async context
@@ -207,6 +202,12 @@ async def execute_command():
         
         # Take screenshot
         screenshot_path = await take_screenshot(command_id)
+        
+        # Trigger screenshot update in WebSocket stream
+        if browser_manager.active_connections:
+            screenshot_b64 = await browser_manager.take_screenshot()
+            if screenshot_b64:
+                await browser_manager.send_frame_update_with_screenshot(screenshot_b64)
         
         # Update status to success
         conn.execute(
@@ -238,9 +239,9 @@ async def create_automation_command(command: AutomationCommand, background_tasks
     try:
         # Get current DOM if page exists
         current_dom = ""
-        if page:
+        if browser_manager.page:
             try:
-                current_dom = await page.content()
+                current_dom = await browser_manager.page.content()
                 current_dom = shrink_dom(current_dom)
             except:
                 pass
@@ -335,9 +336,9 @@ async def get_command(command_id: int):
 @app.get("/api/automation/browser/current-url")
 async def get_current_url():
     """Get current browser URL"""
-    if page:
+    if browser_manager.page:
         try:
-            return {"url": page.url}
+            return {"url": browser_manager.page.url}
         except:
             return {"url": "about:blank"}
     return {"url": "about:blank"}
@@ -345,9 +346,9 @@ async def get_current_url():
 @app.get("/api/automation/browser/dom")
 async def get_current_dom():
     """Get current page DOM (compressed)"""
-    if page:
+    if browser_manager.page:
         try:
-            dom = await page.content()
+            dom = await browser_manager.page.content()
             return {"dom": shrink_dom(dom)}
         except Exception as e:
             return {"dom": "", "error": str(e)}
