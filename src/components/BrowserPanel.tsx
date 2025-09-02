@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
@@ -24,12 +24,24 @@ export const BrowserPanel = ({ currentUrl = '', onUrlChange }: BrowserPanelProps
   const [url, setUrl] = useState(currentUrl);
   const [isLoading, setIsLoading] = useState(false);
   const [viewMode, setViewMode] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
+  const [iframeError, setIframeError] = useState(false);
+
+  useEffect(() => {
+    if (currentUrl && currentUrl !== url) {
+      setUrl(currentUrl);
+      setIframeError(false);
+    }
+  }, [currentUrl]);
 
   const handleNavigate = async (newUrl?: string) => {
     const targetUrl = newUrl || url;
+    if (!targetUrl.trim()) return;
+    
+    const formattedUrl = targetUrl.startsWith('http') ? targetUrl : `https://${targetUrl}`;
     setIsLoading(true);
-    setUrl(targetUrl);
-    onUrlChange?.(targetUrl);
+    setIframeError(false);
+    setUrl(formattedUrl);
+    onUrlChange?.(formattedUrl);
     // Simulate navigation
     await new Promise(resolve => setTimeout(resolve, 1500));
     setIsLoading(false);
@@ -171,13 +183,74 @@ export const BrowserPanel = ({ currentUrl = '', onUrlChange }: BrowserPanelProps
                       <p className="text-muted-foreground">Loading page...</p>
                     </div>
                   </div>
+                ) : url ? (
+                  iframeError ? (
+                    <div className="h-full flex items-center justify-center">
+                      <div className="text-center max-w-md p-8">
+                        <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
+                          <Globe className="w-8 h-8 text-muted-foreground" />
+                        </div>
+                        <h3 className="text-lg font-semibold mb-2">Website cannot be displayed</h3>
+                        <p className="text-muted-foreground mb-4">
+                          This website prevents being displayed in frames for security reasons.
+                        </p>
+                        <div className="bg-muted rounded-lg p-4 text-left">
+                          <p className="text-sm font-medium mb-2">Current URL:</p>
+                          <p className="text-sm text-muted-foreground break-all">{url}</p>
+                        </div>
+                        <div className="mt-4">
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => window.open(url, '_blank')}
+                          >
+                            Open in new tab
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <iframe
+                      src={url}
+                      className="w-full h-full border-0"
+                      title="Browser Content"
+                      sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
+                      onError={() => setIframeError(true)}
+                      onLoad={(e) => {
+                        // Check if iframe loaded successfully
+                        const iframe = e.currentTarget;
+                        try {
+                          const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+                          if (!iframeDoc || iframeDoc.location.href === 'about:blank') {
+                            setIframeError(true);
+                          }
+                        } catch {
+                          // Cross-origin restriction - this is expected
+                          // Don't set error for this case
+                        }
+                      }}
+                    />
+                  )
                 ) : (
-                  <iframe
-                    src={url}
-                    className="w-full h-full border-0"
-                    title="Browser Content"
-                    sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
-                  />
+                  <div className="h-full flex items-center justify-center">
+                    <div className="text-center max-w-md p-8">
+                      <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
+                        <Globe className="w-8 h-8 text-muted-foreground" />
+                      </div>
+                      <h3 className="text-lg font-semibold mb-2">Enter a website URL</h3>
+                      <p className="text-muted-foreground mb-4">
+                        Type a command like "Open google.com" in the chat or enter a URL above to get started.
+                      </p>
+                      <div className="text-left">
+                        <p className="text-sm font-medium mb-2">Example commands:</p>
+                        <div className="space-y-1 text-sm text-muted-foreground">
+                          <p>• "Open google.com"</p>
+                          <p>• "Go to amazon.in"</p>
+                          <p>• "Navigate to github.com"</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 )}
               </div>
             </div>
