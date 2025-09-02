@@ -181,7 +181,8 @@ export const ChatPanel = ({ steps, onExecuteCommand, isExecuting }: ChatPanelPro
               'Open m.domino.co.in',
               'Go to google.com',
               'Navigate to amazon.in',
-              'Enter mobile number 1234567890'
+              'Enter mobile number 1234567890',
+              'reset browser'
             ].map((example) => (
               <Button
                 key={example}

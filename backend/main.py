@@ -333,6 +333,24 @@ async def get_current_dom():
 async def websocket_browser_endpoint(websocket: WebSocket):
     await websocket_endpoint(websocket)
 
+@app.post("/api/automation/reset")
+async def reset_browser():
+    """Reset browser session and clear automation state"""
+    try:
+        await browser_manager.reset_browser()
+        # Clear database records if needed (optional)
+        conn = sqlite3.connect('automation.db')
+        try:
+            conn.execute("DELETE FROM commands")
+            conn.commit()
+        finally:
+            conn.close()
+        
+        return {"status": "success", "message": "Browser and automation state reset successfully"}
+    except Exception as e:
+        logger.error(f"Error resetting automation: {e}")
+        raise HTTPException(status_code=500, detail=f"Reset failed: {str(e)}")
+
 # Serve screenshots
 app.mount("/screenshots", StaticFiles(directory="screenshots"), name="screenshots")
 

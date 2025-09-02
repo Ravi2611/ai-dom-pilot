@@ -143,6 +143,22 @@ class BrowserStreamManager:
             self.page = None
             # Don't close shared browser - it will be reused
 
+    async def reset_browser(self):
+        """Reset browser and notify all connected clients"""
+        try:
+            await self.cleanup()
+            await self.broadcast_message({
+                "type": "browser_reset",
+                "data": {"message": "Browser session reset successfully"}
+            })
+            logger.info("Browser session reset successfully")
+        except Exception as e:
+            logger.error(f"Error resetting browser: {e}")
+            await self.broadcast_message({
+                "type": "browser_error",
+                "data": {"message": f"Browser reset failed: {str(e)}"}
+            })
+
     async def connect_websocket(self, websocket: WebSocket):
         """Add a new WebSocket connection"""
         await websocket.accept()
@@ -208,19 +224,17 @@ class BrowserStreamManager:
             return f"<html><body><h1>Error loading page: {str(e)}</h1></body></html>"
 
     async def send_frame_update(self):
-        """Send current page state to all connected clients"""
+        """Send current page state to all connected clients (URL and title only)"""
         if not self.page:
             return
             
         try:
-            content = await self.get_page_content()
             title = await self.page.title()
             url = self.page.url
             
             frame_data = {
                 "url": url,
                 "title": title,
-                "content": content,
                 "timestamp": asyncio.get_event_loop().time() * 1000
             }
             
@@ -313,6 +327,9 @@ class BrowserStreamManager:
                     if self.page:
                         await self.page.set_viewport_size(viewport)
                 await self.send_frame_update()
+            
+            elif message_type == "reset_browser":
+                await self.reset_browser()
             
             else:
                 logger.warning(f"Unknown message type: {message_type}")

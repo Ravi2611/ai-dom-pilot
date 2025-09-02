@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { ChatPanel } from './ChatPanel';
 import StreamingBrowser from './StreamingBrowser';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
+import { Button } from '@/components/ui/button';
 import { Terminal, Globe } from 'lucide-react';
 
 export interface AutomationStep {
@@ -37,8 +38,42 @@ const AutomationSystem = () => {
     ));
   };
 
+  const resetSystem = async () => {
+    try {
+      // Send reset message to backend
+      const response = await fetch('/api/automation/reset', { method: 'POST' });
+      if (response.ok) {
+        // Clear local state
+        setSteps([]);
+        setCurrentUrl('');
+        setIsExecuting(false);
+        
+        // Add confirmation step
+        const confirmStep: AutomationStep = {
+          id: Date.now().toString(),
+          command: 'System reset completed',
+          generatedCode: '# Browser and chat history cleared successfully',
+          status: 'success',
+          timestamp: new Date(),
+        };
+        setSteps([confirmStep]);
+      }
+    } catch (error) {
+      console.error('Reset failed:', error);
+    }
+  };
+
   const executeCommand = async (command: string) => {
     if (isExecuting) return;
+    
+    // Check for reset commands
+    const lowerCommand = command.toLowerCase().trim();
+    const resetCommands = ['exit', 'reset', 'close browser', 'clear chat', 'start fresh', 'reset browser'];
+    
+    if (resetCommands.some(cmd => lowerCommand === cmd || lowerCommand.includes(cmd))) {
+      await resetSystem();
+      return;
+    }
     
     setIsExecuting(true);
     const stepId = addStep(command);
@@ -126,11 +161,20 @@ page.wait_for_timeout(1000)`;
             <p className="text-xs text-muted-foreground">Natural language to Playwright</p>
           </div>
         </div>
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <div className="flex items-center gap-4 text-sm text-muted-foreground">
           <div className="flex items-center gap-1">
             <div className={`w-2 h-2 rounded-full ${isExecuting ? 'bg-warning pulse-glow' : 'bg-success'}`} />
             {isExecuting ? 'Executing' : 'Ready'}
           </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={resetSystem}
+            disabled={isExecuting}
+            className="h-7 px-3 text-xs"
+          >
+            Reset Browser
+          </Button>
         </div>
       </header>
 

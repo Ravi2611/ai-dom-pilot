@@ -14,7 +14,8 @@ import {
   ArrowRight,
   Wifi,
   WifiOff,
-  AlertCircle
+  AlertCircle,
+  Globe
 } from 'lucide-react';
 
 interface StreamingBrowserProps {
@@ -27,7 +28,6 @@ type ViewMode = 'desktop' | 'tablet' | 'mobile';
 interface BrowserFrame {
   url: string;
   title: string;
-  content: string;
   timestamp: number;
 }
 
@@ -49,6 +49,11 @@ const StreamingBrowser = ({ currentUrl = '', onUrlChange }: StreamingBrowserProp
       } else if (message.type === 'url_changed') {
         setUrl(message.data.url);
         onUrlChange?.(message.data.url);
+      } else if (message.type === 'browser_reset') {
+        setCurrentFrame(null);
+        setUrl('');
+        setIsLoading(false);
+        onUrlChange?.('');
       }
     }
   });
@@ -292,10 +297,19 @@ const StreamingBrowser = ({ currentUrl = '', onUrlChange }: StreamingBrowserProp
                 <RefreshCw className="w-8 h-8 animate-spin text-primary" />
               </div>
             )}
-            <div 
-              className="w-full h-full overflow-auto"
-              dangerouslySetInnerHTML={{ __html: currentFrame.content }}
-            />
+            <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center">
+              <Globe className="w-16 h-16 text-primary mb-4" />
+              <h3 className="text-xl font-semibold text-foreground mb-2">Browser Running</h3>
+              <p className="text-muted-foreground mb-4 max-w-md">
+                The browser is running in the background. Your automation commands will work here, 
+                but the page content is not displayed to avoid conflicts.
+              </p>
+              <div className="space-y-2 text-sm text-muted-foreground">
+                <p><strong>Current URL:</strong> {currentFrame.url}</p>
+                <p><strong>Page Title:</strong> {currentFrame.title}</p>
+                <p><strong>Status:</strong> Ready for automation</p>
+              </div>
+            </div>
           </div>
         )}
       </div>
