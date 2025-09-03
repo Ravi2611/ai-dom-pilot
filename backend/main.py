@@ -18,6 +18,11 @@ from bs4 import BeautifulSoup, Comment
 from websocket_browser import websocket_endpoint, browser_manager, get_shared_browser
 from contextlib import asynccontextmanager
 
+# Import new AI and automation systems
+from ai_providers import ai_manager
+from smart_selectors import SmartRetrySystem
+from vision_automation import VisionAutomationEngine, VisionCommandGenerator
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -78,7 +83,7 @@ class CommandResponse(BaseModel):
 # Global browser instance (removed - now using browser_manager)
 
 def shrink_dom(dom: str) -> str:
-    """Compress DOM by keeping only actionable elements"""
+    """Compress DOM by keeping only actionable elements - Enhanced version"""
     if not dom:
         return ""
     
@@ -90,12 +95,34 @@ def shrink_dom(dom: str) -> str:
     for comment in soup.find_all(string=lambda text: isinstance(text, Comment)):
         comment.extract()
     
-    # Keep only actionable elements
-    form_elements = soup.find_all(["form", "input", "button", "a", "select", "textarea"])
-    return "\n".join(str(el) for el in form_elements)
+    # Enhanced: Keep more interactive elements including divs with roles
+    actionable_elements = soup.find_all([
+        "form", "input", "button", "a", "select", "textarea", "label",
+        # Enhanced: Include divs and spans that might be interactive
+        "div[role]", "span[role]", "div[onclick]", "span[onclick]",
+        "div[data-testid]", "div[class*='button']", "div[class*='click']",
+        "div[class*='radio']", "div[class*='checkbox']", "span[class*='button']"
+    ])
+    
+    # Also include elements with specific attributes that suggest interactivity
+    interactive_attrs = ['onclick', 'onchange', 'role', 'tabindex', 'data-testid', 'aria-label']
+    for attr in interactive_attrs:
+        elements_with_attr = soup.find_all(attrs={attr: True})
+        actionable_elements.extend(elements_with_attr)
+    
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_elements = []
+    for el in actionable_elements:
+        el_str = str(el)
+        if el_str not in seen:
+            seen.add(el_str)
+            unique_elements.append(el)
+    
+    return "\n".join(str(el) for el in unique_elements[:50])  # Limit to 50 elements
 
-def ai_to_code(command: str, dom: str = "") -> str:
-    """Convert natural language + DOM into runnable Playwright code"""
+async def ai_to_code(command: str, dom: str = "") -> str:
+    """Enhanced AI code generation with multi-provider fallback and smart retry"""
     command_lower = command.lower()
     
     # Extract OTP digits from command
@@ -118,41 +145,92 @@ for i, digit in enumerate(otp):
     if "otp" in command_lower:
         return f'await page.fill(\'input[name="otp"], input[placeholder*="otp" i]\', "{otp_value}")'
     
-    # Generic fallback to LLM
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are an assistant that converts natural language automation commands "
-                "into direct runnable Python code using Playwright async API. "
-                "The code will be executed inside a context where a `page` object exists. "
-                "Use await for all Playwright methods. Do NOT define functions, classes, imports, or variables. "
-                "Use DOM to infer selectors if possible. Return only raw code, no markdown fences. "
-                "Always use await with page methods like page.click(), page.fill(), page.goto(), etc."
-            ),
-        },
-        {"role": "user", "content": f"Command: {command}\n\nDOM:\n{dom}" if dom else command},
-    ]
-    
+    # Use multi-provider AI system with vision enhancement
     try:
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=messages,
-            temperature=0,
-        )
-        
-        code = response.choices[0].message.content.strip()
-        
-        # Clean accidental markdown fences
-        if code.startswith("```"):
-            code = code.split("```")[1]
-            if code.startswith("python"):
-                code = code[len("python"):].strip()
-            code = code.split("```")[0].strip()
-        
-        return code
+        # Check if we should use vision-enhanced generation
+        if browser_manager.page:
+            vision_generator = VisionCommandGenerator(browser_manager.page)
+            code = await vision_generator.generate_vision_enhanced_code(command, dom)
+            
+            # Add smart retry wrapper
+            enhanced_code = f'''
+# Enhanced automation with smart retry system
+from smart_selectors import SmartRetrySystem
+from vision_automation import VisionAutomationEngine
+
+retry_system = SmartRetrySystem(page)
+vision_engine = VisionAutomationEngine(page)
+
+# Original generated code with smart fallbacks
+try:
+{textwrap.indent(code, '    ')}
+except Exception as e:
+    print(f"Primary automation failed: {{e}}")
+    
+    # Smart retry for click operations
+    import re
+    if "click" in "{command_lower}":
+        target_text = "{command}".split("click")[-1].strip().strip("on").strip()
+        if target_text:
+            success = await retry_system.smart_click(target_text, """{dom}""")
+            if not success:
+                await vision_engine.vision_click("{command}")
+    
+    # Smart retry for fill operations  
+    elif "fill" in "{command_lower}" or "enter" in "{command_lower}" or "type" in "{command_lower}":
+        parts = "{command}".split()
+        if len(parts) >= 2:
+            field_name = parts[0]
+            value = " ".join(parts[1:])
+            success = await retry_system.smart_fill(field_name, value, """{dom}""")
+            if not success:
+                await vision_engine.vision_fill("{command}", value)
+    else:
+        raise e
+'''
+            return enhanced_code
+        else:
+            # Fallback to regular AI generation
+            response = await ai_manager.generate_code_with_fallback(command, dom)
+            return response.content
+            
     except Exception as e:
-        return f'# Error generating code: {str(e)}\nawait page.wait_for_timeout(1000)'
+        print(f"Enhanced AI generation failed: {e}")
+        # Final fallback to original Groq
+        try:
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an assistant that converts natural language automation commands "
+                        "into direct runnable Python code using Playwright async API. "
+                        "The code will be executed inside a context where a `page` object exists. "
+                        "Use await for all Playwright methods. Do NOT define functions, classes, imports, or variables. "
+                        "Use DOM to infer selectors if possible. Return only raw code, no markdown fences. "
+                        "Always use await with page methods like page.click(), page.fill(), page.goto(), etc."
+                    ),
+                },
+                {"role": "user", "content": f"Command: {command}\n\nDOM:\n{dom}" if dom else command},
+            ]
+            
+            response = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=messages,
+                temperature=0,
+            )
+            
+            code = response.choices[0].message.content.strip()
+            
+            # Clean accidental markdown fences
+            if code.startswith("```"):
+                code = code.split("```")[1]
+                if code.startswith("python"):
+                    code = code[len("python"):].strip()
+                code = code.split("```")[0].strip()
+            
+            return code
+        except Exception as fallback_error:
+            return f'# Error generating code: {str(fallback_error)}\nawait page.wait_for_timeout(1000)'
 
 async def take_screenshot(command_id: int) -> str:
     """Take screenshot and save it"""
@@ -254,8 +332,8 @@ async def create_automation_command(command: AutomationCommand, background_tasks
         # Use provided DOM or current DOM
         dom_to_use = command.dom if command.dom else current_dom
         
-        # Generate code
-        generated_code = ai_to_code(command.command, dom_to_use)
+        # Generate code with enhanced AI system
+        generated_code = await ai_to_code(command.command, dom_to_use)
         
         # Insert command into database
         cursor = conn.execute(
