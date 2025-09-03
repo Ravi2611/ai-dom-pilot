@@ -483,50 +483,72 @@ class AIProviderManager:
     
     def setup_providers(self):
         """Initialize available AI providers"""
+        print("🔧 Setting up AI providers...")
+        
         # Ollama (Priority 1 - Free, unlimited, local)
         ollama_host = os.getenv("OLLAMA_HOST", "localhost:11434")
         ollama_model = os.getenv("OLLAMA_MODEL", "codellama:7b")
+        print(f"🐪 Attempting Ollama setup: {ollama_host} with model {ollama_model}")
         try:
             self.providers["ollama"] = OllamaProvider(ollama_host, ollama_model)
             if self.providers["ollama"].is_available():
                 self.fallback_chain.append("ollama")
-                print(f"✅ Ollama provider added with model {ollama_model}")
+                print(f"✅ Ollama provider added successfully with model {ollama_model}")
             else:
                 print(f"❌ Ollama not available - server running? Model {ollama_model} exists?")
+                print(f"💡 Check: docker run -d -v ollama:/root/.ollama -p 11434:11434 --name ollama ollama/ollama")
         except Exception as e:
             print(f"❌ Ollama setup failed: {str(e)}")
         
-        # Groq
+        # Groq (Priority 2 - Fast, rate limited)
         groq_key = os.getenv("GROQ_API_KEY")
+        print(f"🚀 Attempting Groq setup: API key {'✅ provided' if groq_key else '❌ missing'}")
         if groq_key:
             try:
                 self.providers["groq"] = GroqProvider(groq_key)
                 if self.providers["groq"].is_available():
                     self.fallback_chain.append("groq")
-            except Exception:
-                pass
+                    print(f"✅ Groq provider added successfully")
+                else:
+                    print(f"❌ Groq provider not available (API key invalid?)")
+            except Exception as e:
+                print(f"❌ Groq setup failed: {str(e)}")
+        else:
+            print("⚠️ Groq API key not found in environment")
         
-        # OpenAI
+        # OpenAI (Priority 3 - Reliable, expensive)
         openai_key = os.getenv("OPENAI_API_KEY")
+        print(f"🤖 Attempting OpenAI setup: API key {'✅ provided' if openai_key else '❌ missing'}")
         if openai_key:
             try:
                 self.providers["openai"] = OpenAIProvider(openai_key)
                 if self.providers["openai"].is_available():
                     self.fallback_chain.append("openai")
-            except Exception:
-                pass
+                    print(f"✅ OpenAI provider added successfully")
+                else:
+                    print(f"❌ OpenAI provider not available")
+            except Exception as e:
+                print(f"❌ OpenAI setup failed: {str(e)}")
         
-        # Anthropic
+        # Anthropic (Priority 4 - Reliable, expensive)
         anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+        print(f"🧠 Attempting Anthropic setup: API key {'✅ provided' if anthropic_key else '❌ missing'}")
         if anthropic_key:
             try:
                 self.providers["anthropic"] = AnthropicProvider(anthropic_key)
                 if self.providers["anthropic"].is_available():
                     self.fallback_chain.append("anthropic")
-            except Exception:
-                pass
+                    print(f"✅ Anthropic provider added successfully")
+                else:
+                    print(f"❌ Anthropic provider not available")
+            except Exception as e:
+                print(f"❌ Anthropic setup failed: {str(e)}")
         
-        print(f"Available AI providers: {self.fallback_chain}")
+        print(f"🎯 Final fallback chain: {self.fallback_chain}")
+        if not self.fallback_chain:
+            print("⚠️ WARNING: No AI providers available! Check your configuration.")
+        elif len(self.fallback_chain) == 1:
+            print(f"⚠️ WARNING: Only one provider ({self.fallback_chain[0]}) available. Consider adding fallbacks.")
     
     async def generate_code_with_fallback(self, command: str, dom: str = "", screenshot: str = "") -> AIResponse:
         """Try multiple providers with fallback chain"""

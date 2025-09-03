@@ -196,41 +196,14 @@ except Exception as e:
             
     except Exception as e:
         print(f"Enhanced AI generation failed: {e}")
-        # Final fallback to original Groq
+        # Use the AI manager's fallback system instead of redundant Groq fallback
         try:
-            messages = [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are an assistant that converts natural language automation commands "
-                        "into direct runnable Python code using Playwright async API. "
-                        "The code will be executed inside a context where a `page` object exists. "
-                        "Use await for all Playwright methods. Do NOT define functions, classes, imports, or variables. "
-                        "Use DOM to infer selectors if possible. Return only raw code, no markdown fences. "
-                        "Always use await with page methods like page.click(), page.fill(), page.goto(), etc."
-                    ),
-                },
-                {"role": "user", "content": f"Command: {command}\n\nDOM:\n{dom}" if dom else command},
-            ]
-            
-            response = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=messages,
-                temperature=0,
-            )
-            
-            code = response.choices[0].message.content.strip()
-            
-            # Clean accidental markdown fences
-            if code.startswith("```"):
-                code = code.split("```")[1]
-                if code.startswith("python"):
-                    code = code[len("python"):].strip()
-                code = code.split("```")[0].strip()
-            
-            return code
+            print("🔄 Falling back to AI manager's fallback system...")
+            response = await ai_manager.generate_code_with_fallback(command, dom)
+            return response.content
         except Exception as fallback_error:
-            return f'# Error generating code: {str(fallback_error)}\nawait page.wait_for_timeout(1000)'
+            print(f"❌ All AI providers failed: {str(fallback_error)}")
+            return f'# Error: All AI providers failed - {str(fallback_error)}\n# Please check your AI provider configuration\nawait page.wait_for_timeout(1000)'
 
 async def take_screenshot(command_id: int) -> str:
     """Take screenshot and save it"""
