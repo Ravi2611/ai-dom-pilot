@@ -445,8 +445,11 @@ class AIProviderManager:
             self.providers["ollama"] = OllamaProvider(ollama_host, ollama_model)
             if self.providers["ollama"].is_available():
                 self.fallback_chain.append("ollama")
-        except Exception:
-            pass
+                print(f"✅ Ollama provider added with model {ollama_model}")
+            else:
+                print(f"❌ Ollama not available - server running? Model {ollama_model} exists?")
+        except Exception as e:
+            print(f"❌ Ollama setup failed: {str(e)}")
         
         # Groq
         groq_key = os.getenv("GROQ_API_KEY")
