@@ -168,7 +168,6 @@ except Exception as e:
     print(f"Primary automation failed: {{e}}")
     
     # Smart retry for click operations
-    import re
     if "click" in "{command_lower}":
         target_text = "{command}".split("click")[-1].strip().strip("on").strip()
         if target_text:
