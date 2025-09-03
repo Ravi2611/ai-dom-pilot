@@ -364,13 +364,22 @@ class OllamaProvider(BaseAIProvider):
     
     def is_available(self) -> bool:
         if not self.client:
+            print(f"❌ Ollama client not available - ollama package not installed?")
             return False
         try:
             # Test connection and model availability
+            print(f"🔍 Testing Ollama connection to {self.host}...")
             response = self.client.list()
             models = [model['name'] for model in response.get('models', [])]
-            return self.model in models
-        except Exception:
+            print(f"📋 Available models: {models}")
+            if self.model in models:
+                print(f"✅ Model {self.model} found!")
+                return True
+            else:
+                print(f"❌ Model {self.model} not found in available models")
+                return False
+        except Exception as e:
+            print(f"❌ Ollama connection error: {str(e)}")
             return False
     
     async def generate_code(self, command: str, dom: str = "", screenshot: str = "") -> AIResponse:
