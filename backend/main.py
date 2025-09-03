@@ -167,7 +167,7 @@ _retry_count = getattr(page, '_retry_count', 0)
 
 # Original generated code with smart fallbacks
 try:
-{textwrap.indent(code, '    ')}
+{textwrap.indent(code.strip() if code.strip() else '    pass  # Empty code generated', '    ')}
 except Exception as e:
     print(f"Primary automation failed: {{e}}")
     
