@@ -240,8 +240,9 @@ async def _ai_model_fallback(page, command: str, dom: str, tried_providers: set,
             except:
                 pass
         
-        # Generate new code with next AI provider
-        response = await ai_manager.generate_code_with_fallback(command, current_dom)
+        # Generate new code with next AI provider, skipping already tried ones
+        failed_providers = list(tried_providers) if tried_providers else []
+        response = await ai_manager.generate_code_with_fallback(command, current_dom, skip_providers=failed_providers)
         
         if response and response.content:
             print(f"✅ Generated fallback code with {response.provider}: {response.content[:100]}...")

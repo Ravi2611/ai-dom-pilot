@@ -555,13 +555,16 @@ class AIProviderManager:
         elif len(self.fallback_chain) == 1:
             print(f"⚠️ WARNING: Only one provider ({self.fallback_chain[0]}) available. Consider adding fallbacks.")
     
-    async def generate_code_with_fallback(self, command: str, dom: str = "", screenshot: str = "") -> AIResponse:
-        """Try multiple providers with fallback chain"""
+    async def generate_code_with_fallback(self, command: str, dom: str = "", screenshot: str = "", skip_providers: List[str] = None) -> AIResponse:
+        """Try multiple providers with fallback chain, optionally skipping failed providers"""
         last_error = None
+        skip_providers = skip_providers or []
         
         for provider_name in self.fallback_chain:
             provider = self.providers.get(provider_name)
-            if not provider or not provider.is_available():
+            if not provider or not provider.is_available() or provider_name in skip_providers:
+                if provider_name in skip_providers:
+                    print(f"⏭️  Skipping {provider_name} (already failed)")
                 continue
             
             try:
@@ -577,13 +580,16 @@ class AIProviderManager:
         # All providers failed
         raise RuntimeError(f"All AI providers failed. Last error: {str(last_error)}")
     
-    async def analyze_screenshot_with_fallback(self, screenshot: str, command: str) -> AIResponse:
-        """Try vision-capable providers for screenshot analysis"""
+    async def analyze_screenshot_with_fallback(self, screenshot: str, command: str, skip_providers: List[str] = None) -> AIResponse:
+        """Try vision-capable providers for screenshot analysis, optionally skipping failed providers"""
         vision_providers = ["openai", "anthropic"]  # Providers that support vision
         last_error = None
+        skip_providers = skip_providers or []
         
         for provider_name in vision_providers:
-            if provider_name not in self.providers:
+            if provider_name not in self.providers or provider_name in skip_providers:
+                if provider_name in skip_providers:
+                    print(f"⏭️  Skipping {provider_name} vision (already failed)")
                 continue
                 
             provider = self.providers[provider_name]
