@@ -138,7 +138,7 @@ class GroqProvider(BaseAIProvider):
 
 
 class OpenAIProvider(BaseAIProvider):
-    def __init__(self, api_key: str, model: str = "gpt-4o"):
+    def __init__(self, api_key: str, model: str = "gpt-4o-mini"):
         super().__init__(api_key, model)
         if openai:
             self.client = openai.OpenAI(api_key=api_key)
@@ -246,7 +246,7 @@ class OpenAIProvider(BaseAIProvider):
 
 
 class AnthropicProvider(BaseAIProvider):
-    def __init__(self, api_key: str, model: str = "claude-3-sonnet-20240229"):
+    def __init__(self, api_key: str, model: str = "claude-3-5-haiku-20241022"):
         super().__init__(api_key, model)
         if anthropic:
             self.client = anthropic.Anthropic(api_key=api_key)
