@@ -35,8 +35,14 @@ except ImportError:
     genai = None
     GenerativeModel = None
 
+try:
+    import ollama
+except ImportError:
+    ollama = None
+
 
 class AIProvider(Enum):
+    OLLAMA = "ollama"
     GROQ = "groq"
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
@@ -350,6 +356,80 @@ class AnthropicProvider(BaseAIProvider):
             raise RuntimeError(f"Anthropic vision analysis error: {str(e)}")
 
 
+class OllamaProvider(BaseAIProvider):
+    def __init__(self, host: str = "localhost:11434", model: str = "codellama:7b"):
+        super().__init__("", model)  # Ollama doesn't use API keys
+        self.host = host
+        self.client = ollama if ollama else None
+    
+    def is_available(self) -> bool:
+        if not self.client:
+            return False
+        try:
+            # Test connection and model availability
+            response = self.client.list()
+            models = [model['name'] for model in response.get('models', [])]
+            return self.model in models
+        except Exception:
+            return False
+    
+    async def generate_code(self, command: str, dom: str = "", screenshot: str = "") -> AIResponse:
+        if not self.is_available():
+            raise RuntimeError("Ollama client not available or model not found")
+        
+        content = f"""You are an expert browser automation assistant that converts natural language commands into Playwright Python code. 
+
+IMPORTANT RULES:
+- Return ONLY executable Python code
+- NO markdown fences, NO explanations, NO comments
+- Use await for all async operations
+- The 'page' object is available in context
+- Focus on the specific command given
+
+Command: {command}"""
+        
+        if dom:
+            content += f"\n\nDOM Context:\n{dom}"
+        
+        try:
+            response = self.client.generate(
+                model=self.model,
+                prompt=content,
+                options={
+                    'temperature': 0,
+                    'num_predict': 1000,
+                    'stop': ['```', 'explanation:', 'note:']
+                }
+            )
+            
+            code = response['response'].strip()
+            
+            # Clean any markdown fences that might slip through
+            if code.startswith("```"):
+                code = code.split("```")[1]
+                if code.startswith("python"):
+                    code = code[len("python"):].strip()
+                code = code.split("```")[0].strip()
+            
+            return AIResponse(
+                content=code,
+                provider="ollama",
+                model=self.model,
+                confidence=0.85
+            )
+        except Exception as e:
+            raise RuntimeError(f"Ollama API error: {str(e)}")
+    
+    async def analyze_screenshot(self, screenshot: str, command: str) -> AIResponse:
+        # Ollama doesn't support vision analysis for most models
+        return AIResponse(
+            content="Vision analysis not supported by Ollama",
+            provider="ollama",
+            model=self.model,
+            confidence=0.0
+        )
+
+
 class AIProviderManager:
     def __init__(self):
         self.providers: Dict[str, BaseAIProvider] = {}
@@ -358,6 +438,16 @@ class AIProviderManager:
     
     def setup_providers(self):
         """Initialize available AI providers"""
+        # Ollama (Priority 1 - Free, unlimited, local)
+        ollama_host = os.getenv("OLLAMA_HOST", "localhost:11434")
+        ollama_model = os.getenv("OLLAMA_MODEL", "codellama:7b")
+        try:
+            self.providers["ollama"] = OllamaProvider(ollama_host, ollama_model)
+            if self.providers["ollama"].is_available():
+                self.fallback_chain.append("ollama")
+        except Exception:
+            pass
+        
         # Groq
         groq_key = os.getenv("GROQ_API_KEY")
         if groq_key:
