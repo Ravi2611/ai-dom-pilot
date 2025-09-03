@@ -370,16 +370,52 @@ class OllamaProvider(BaseAIProvider):
             # Test connection and model availability
             print(f"🔍 Testing Ollama connection to {self.host}...")
             response = self.client.list()
-            models = [model['name'] for model in response.get('models', [])]
-            print(f"📋 Available models: {models}")
+            print(f"🐛 Raw Ollama response: {response}")
+            
+            # Handle different possible response formats
+            models = []
+            if isinstance(response, dict):
+                if 'models' in response:
+                    # Handle dict response with 'models' key
+                    for model in response['models']:
+                        if isinstance(model, dict) and 'name' in model:
+                            models.append(model['name'])
+                        elif isinstance(model, dict) and 'model' in model:
+                            models.append(model['model'])
+                        elif isinstance(model, str):
+                            models.append(model)
+                elif hasattr(response, 'models'):
+                    # Handle object response with models attribute
+                    for model in response.models:
+                        if hasattr(model, 'name'):
+                            models.append(model.name)
+                        elif hasattr(model, 'model'):
+                            models.append(model.model)
+                        elif isinstance(model, str):
+                            models.append(model)
+            elif hasattr(response, 'models'):
+                # Handle response object with models attribute
+                for model in response.models:
+                    if hasattr(model, 'name'):
+                        models.append(model.name)
+                    elif hasattr(model, 'model'):
+                        models.append(model.model)
+                    elif isinstance(model, str):
+                        models.append(model)
+            
+            print(f"📋 Extracted model names: {models}")
             if self.model in models:
                 print(f"✅ Model {self.model} found!")
                 return True
             else:
                 print(f"❌ Model {self.model} not found in available models")
+                print(f"💡 Available models: {models}")
                 return False
         except Exception as e:
             print(f"❌ Ollama connection error: {str(e)}")
+            print(f"🐛 Error type: {type(e).__name__}")
+            import traceback
+            print(f"🐛 Full traceback: {traceback.format_exc()}")
             return False
     
     async def generate_code(self, command: str, dom: str = "", screenshot: str = "") -> AIResponse:
