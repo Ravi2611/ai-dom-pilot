@@ -422,24 +422,29 @@ class OllamaProvider(BaseAIProvider):
         if not self.is_available():
             raise RuntimeError("Ollama client not available or model not found")
         
-        content = f"""You are an expert browser automation assistant that converts natural language commands into Playwright Python code. 
+        prompt = f"""TASK: Generate Playwright Python code for: {command}
 
-IMPORTANT RULES:
-- Return ONLY executable Python code
-- NO markdown fences, NO explanations, NO comments
-- Use await for all async operations
-- The 'page' object is available in context
-- Focus on the specific command given
+RULES:
+1. Output ONLY executable Python code
+2. NO explanations, markdown, or comments
+3. Use 'page' variable (Playwright Page object)
+4. Use await for async operations
+5. Start coding immediately
 
-Command: {command}"""
+EXAMPLES:
+- Click button: await page.click('button:has-text("Submit")')
+- Fill input: await page.fill('input[name="email"]', "test@example.com")
+- Wait: await page.wait_for_timeout(1000)
+
+CODE:"""
         
         if dom:
-            content += f"\n\nDOM Context:\n{dom}"
+            prompt += f"\n\nDOM Context:\n{dom}"
         
         try:
             response = self.client.generate(
                 model=self.model,
-                prompt=content,
+                prompt=prompt,
                 options={
                     'temperature': 0,
                     'num_predict': 1000,
