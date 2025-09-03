@@ -152,14 +152,18 @@ for i, digit in enumerate(otp):
             vision_generator = VisionCommandGenerator(browser_manager.page)
             code = await vision_generator.generate_vision_enhanced_code(command, dom)
             
-            # Add smart retry wrapper
+            # Add smart retry wrapper with AI fallback
             enhanced_code = f'''
-# Enhanced automation with smart retry system
+# Enhanced automation with smart retry system and AI fallback
 from smart_selectors import SmartRetrySystem
 from vision_automation import VisionAutomationEngine
 
 retry_system = SmartRetrySystem(page)
 vision_engine = VisionAutomationEngine(page)
+
+# Track tried providers to avoid infinite loops
+_tried_providers = getattr(page, '_tried_providers', set())
+_retry_count = getattr(page, '_retry_count', 0)
 
 # Original generated code with smart fallbacks
 try:
@@ -173,7 +177,10 @@ except Exception as e:
         if target_text:
             success = await retry_system.smart_click(target_text, """{dom}""")
             if not success:
-                await vision_engine.vision_click("{command}")
+                success = await vision_engine.vision_click("{command}")
+                if not success:
+                    # AI model fallback - regenerate code with next provider
+                    await _ai_model_fallback(page, "{command}", """{dom}""", _tried_providers, _retry_count)
     
     # Smart retry for fill operations  
     elif "fill" in "{command_lower}" or "enter" in "{command_lower}" or "type" in "{command_lower}":
@@ -183,9 +190,13 @@ except Exception as e:
             value = " ".join(parts[1:])
             success = await retry_system.smart_fill(field_name, value, """{dom}""")
             if not success:
-                await vision_engine.vision_fill("{command}", value)
+                success = await vision_engine.vision_fill("{command}", value)
+                if not success:
+                    # AI model fallback - regenerate code with next provider
+                    await _ai_model_fallback(page, "{command}", """{dom}""", _tried_providers, _retry_count)
     else:
-        raise e
+        # Direct AI model fallback for other operations
+        await _ai_model_fallback(page, "{command}", """{dom}""", _tried_providers, _retry_count)
 '''
             return enhanced_code
         else:
@@ -203,6 +214,72 @@ except Exception as e:
         except Exception as fallback_error:
             print(f"❌ All AI providers failed: {str(fallback_error)}")
             return f'# Error: All AI providers failed - {str(fallback_error)}\n# Please check your AI provider configuration\nawait page.wait_for_timeout(1000)'
+
+async def _ai_model_fallback(page, command: str, dom: str, tried_providers: set, retry_count: int):
+    """AI model fallback function for failed automation actions"""
+    
+    # Prevent infinite loops
+    max_retries = 3
+    if retry_count >= max_retries:
+        print(f"❌ Maximum retry attempts ({max_retries}) reached for command: {command}")
+        raise Exception(f"All retry attempts exhausted for command: {command}")
+    
+    # Update page state
+    page._retry_count = retry_count + 1
+    page._tried_providers = tried_providers
+    
+    print(f"🔄 AI Model Fallback (attempt {retry_count + 1}/{max_retries}) for command: {command}")
+    
+    try:
+        # Get current page DOM for context
+        current_dom = dom
+        if not current_dom and page:
+            try:
+                current_dom = await page.content()
+                current_dom = shrink_dom(current_dom)
+            except:
+                pass
+        
+        # Generate new code with next AI provider
+        response = await ai_manager.generate_code_with_fallback(command, current_dom)
+        
+        if response and response.content:
+            print(f"✅ Generated fallback code with {response.provider}: {response.content[:100]}...")
+            
+            # Execute the newly generated code
+            try:
+                # Create isolated execution context
+                exec_code = f"""
+async def fallback_execute():
+{textwrap.indent(response.content, '    ')}
+"""
+                
+                fallback_globals = {
+                    "__builtins__": __builtins__,
+                    "page": page
+                }
+                
+                exec(compile(exec_code, "<string>", "exec"), fallback_globals)
+                fallback_function = fallback_globals['fallback_execute']
+                await fallback_function()
+                
+                print(f"✅ Fallback code executed successfully with {response.provider}")
+                return True
+                
+            except Exception as exec_error:
+                print(f"⚠️ Fallback code execution failed: {exec_error}")
+                # Try the next provider recursively
+                return await _ai_model_fallback(page, command, dom, tried_providers, retry_count + 1)
+        else:
+            print("❌ No fallback code generated")
+            raise Exception("Failed to generate fallback code")
+            
+    except Exception as e:
+        print(f"❌ AI model fallback failed: {e}")
+        if retry_count < max_retries - 1:
+            return await _ai_model_fallback(page, command, dom, tried_providers, retry_count + 1)
+        else:
+            raise Exception(f"All AI model fallback attempts failed: {e}")
 
 async def take_screenshot(command_id: int) -> str:
     """Take screenshot and save it"""
@@ -242,8 +319,14 @@ async def execute_command():
 {textwrap.indent(generated_code, '    ')}
 """
         
-        # Execute the async code to define the function
-        exec_globals = {"__builtins__": __builtins__, "page": browser_manager.page}
+        # Execute the async code to define the function with AI fallback context
+        exec_globals = {
+            "__builtins__": __builtins__, 
+            "page": browser_manager.page,
+            "_ai_model_fallback": _ai_model_fallback,
+            "ai_manager": ai_manager,
+            "textwrap": textwrap
+        }
         exec(compile(async_code, "<string>", "exec"), exec_globals)
         
         # Get the function and execute it in our async context
