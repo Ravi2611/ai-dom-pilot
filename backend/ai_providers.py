@@ -6,6 +6,8 @@ Supports Groq, OpenAI, Anthropic, and Google AI with fallback chains
 import os
 import json
 import asyncio
+import time
+import signal
 from typing import List, Dict, Any, Optional, Union
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -512,22 +514,22 @@ class StarCoder2Provider(BaseAIProvider):
             inputs = self.tokenizer.encode(prompt, return_tensors="pt", truncation=True, max_length=1024)
             inputs = inputs.to(self.device)
             
-            # Generate code with optimized parameters for speed
+            # Generate code with minimal valid parameters (fixed hanging issue)
+            print(f"🚀 StarCoder2 generating code for: {command[:50]}...")
+            start_time = time.time()
+            
             with torch.no_grad():
                 outputs = self.model.generate(
                     inputs,
-                    max_new_tokens=128,        # Reduced from 512 for speed
-                    max_length=1024,          # Reduced total length
-                    temperature=0.0,          # Deterministic for speed
-                    do_sample=False,          # Faster greedy decoding
+                    max_new_tokens=128,        # Generate up to 128 new tokens
+                    do_sample=False,          # Deterministic greedy decoding  
                     pad_token_id=self.tokenizer.eos_token_id,
                     eos_token_id=self.tokenizer.eos_token_id,
-                    use_cache=True,           # Enable KV cache
-                    early_stopping=True,     # Stop early when possible
-                    num_beams=1,             # Single beam for speed
-                    stop_strings=["```"],    # Reduced stop strings for speed
-                    tokenizer=self.tokenizer
+                    use_cache=True            # Enable KV cache for speed
                 )
+            
+            generation_time = time.time() - start_time
+            print(f"⚡ StarCoder2 generated in {generation_time:.2f}s")
             
             # Decode response
             generated = self.tokenizer.decode(outputs[0][len(inputs[0]):], skip_special_tokens=True)
@@ -878,7 +880,7 @@ class AIProviderManager:
                 
                 # Apply timeout for StarCoder2 (local model that can be slow)
                 if provider_name == "starcoder2":
-                    timeout = 10  # 10 second timeout for StarCoder2
+                    timeout = 5  # Reduced to 5 seconds for faster fallback
                     try:
                         result = await asyncio.wait_for(
                             provider.generate_code(command, dom, screenshot),
@@ -888,6 +890,9 @@ class AIProviderManager:
                         return result
                     except asyncio.TimeoutError:
                         print(f"⏰ {provider_name} timed out after {timeout}s, falling back...")
+                        # Clear model cache if repeatedly timing out
+                        if hasattr(provider, '_cache'):
+                            provider._cache.clear()
                         continue
                 else:
                     # No timeout for cloud providers (they're usually fast)
