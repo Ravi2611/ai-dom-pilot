@@ -480,7 +480,8 @@ class StarCoder2Provider(BaseAIProvider):
                     top_p=0.95,
                     pad_token_id=self.tokenizer.eos_token_id,
                     eos_token_id=self.tokenizer.eos_token_id,
-                    stop_strings=["```", "\n\n#", "def ", "class "]
+                    stop_strings=["```", "\n\n#", "def ", "class "],
+                    tokenizer=self.tokenizer
                 )
             
             # Decode response
