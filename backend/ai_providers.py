@@ -401,6 +401,8 @@ class StarCoder2Provider(BaseAIProvider):
         self.tokenizer = None
         self.device = None
         self._loading = False
+        self._cache = {}  # Simple response cache
+        self._model_ready = False
         
     def is_available(self) -> bool:
         """Check if required packages are available"""
@@ -409,46 +411,80 @@ class StarCoder2Provider(BaseAIProvider):
                 AutoTokenizer is not None)
     
     async def _load_model(self):
-        """Load the model and tokenizer if not already loaded"""
-        if self.model is not None or self._loading:
+        """Load the model and tokenizer with optimizations"""
+        if self._model_ready or self._loading:
             return
             
         self._loading = True
         try:
-            print(f"🔥 Loading StarCoder2 model: {self.model_name}")
+            print(f"🔥 Loading optimized StarCoder2 model: {self.model_name}")
             
-            # Detect device
+            # Detect device and set optimizations
             if torch.cuda.is_available():
                 self.device = "cuda"
-                print("🚀 Using GPU acceleration")
+                print("🚀 Using GPU acceleration with optimizations")
             else:
                 self.device = "cpu"
-                print("💻 Using CPU (consider GPU for faster inference)")
+                print("💻 Using CPU with optimizations")
             
-            # Load tokenizer
+            # Load tokenizer with fast tokenizer
             print("📚 Loading tokenizer...")
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                self.model_name,
+                use_fast=True,  # Use fast tokenizer
+                trust_remote_code=True
+            )
             if self.tokenizer.pad_token is None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
             
-            # Load model
-            print("🧠 Loading model...")
+            # Load model with optimization flags
+            print("🧠 Loading model with optimizations...")
+            load_kwargs = {
+                "torch_dtype": torch.float16 if self.device == "cuda" else torch.float32,
+                "trust_remote_code": True,
+                "low_cpu_mem_usage": True,  # Optimize memory usage
+                "use_cache": True,          # Enable KV cache
+            }
+            
+            if self.device == "cuda":
+                load_kwargs["device_map"] = "auto"
+                load_kwargs["use_flash_attention_2"] = True  # Use flash attention if available
+            
             self.model = AutoModelForCausalLM.from_pretrained(
                 self.model_name,
-                torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-                device_map="auto" if self.device == "cuda" else None,
-                trust_remote_code=True
+                **load_kwargs
             )
             
             if self.device == "cpu":
                 self.model = self.model.to(self.device)
             
-            print("✅ StarCoder2 model loaded successfully!")
+            # Enable optimizations
+            self.model.eval()  # Set to evaluation mode
+            if hasattr(self.model, 'tie_weights'):
+                self.model.tie_weights()
+                
+            # Apply torch.compile for PyTorch 2.0+ if available
+            if hasattr(torch, 'compile') and self.device == "cuda":
+                try:
+                    print("⚡ Applying torch.compile for faster inference...")
+                    self.model = torch.compile(self.model, mode="reduce-overhead")
+                except Exception as e:
+                    print(f"⚠️ torch.compile failed: {e}, continuing without it")
+            
+            # Model warm-up with dummy input
+            print("🔥 Warming up model...")
+            dummy_input = self.tokenizer.encode("async def", return_tensors="pt").to(self.device)
+            with torch.no_grad():
+                _ = self.model.generate(dummy_input, max_new_tokens=1, do_sample=False)
+            
+            self._model_ready = True
+            print("✅ StarCoder2 model optimized and ready!")
             
         except Exception as e:
             print(f"❌ Failed to load StarCoder2 model: {str(e)}")
             self.model = None
             self.tokenizer = None
+            self._model_ready = False
             raise
         finally:
             self._loading = False
@@ -457,30 +493,39 @@ class StarCoder2Provider(BaseAIProvider):
         if not self.is_available():
             raise RuntimeError("StarCoder2 dependencies not available")
         
+        # Check cache first
+        cache_key = f"{command}:{hash(dom)}"
+        if cache_key in self._cache:
+            print("🚀 Using cached response for StarCoder2")
+            return self._cache[cache_key]
+        
         await self._load_model()
         
         if self.model is None or self.tokenizer is None:
             raise RuntimeError("StarCoder2 model not loaded")
         
-        # Create specialized prompt for StarCoder2
-        prompt = self._create_starcoder_prompt(command, dom)
+        # Create optimized shorter prompt
+        prompt = self._create_optimized_prompt(command, dom)
         
         try:
-            # Tokenize input
-            inputs = self.tokenizer.encode(prompt, return_tensors="pt", truncation=True, max_length=2048)
+            # Tokenize input with shorter context
+            inputs = self.tokenizer.encode(prompt, return_tensors="pt", truncation=True, max_length=1024)
             inputs = inputs.to(self.device)
             
-            # Generate code
+            # Generate code with optimized parameters for speed
             with torch.no_grad():
                 outputs = self.model.generate(
                     inputs,
-                    max_new_tokens=512,
-                    temperature=0.1,
-                    do_sample=True,
-                    top_p=0.95,
+                    max_new_tokens=128,        # Reduced from 512 for speed
+                    max_length=1024,          # Reduced total length
+                    temperature=0.0,          # Deterministic for speed
+                    do_sample=False,          # Faster greedy decoding
                     pad_token_id=self.tokenizer.eos_token_id,
                     eos_token_id=self.tokenizer.eos_token_id,
-                    stop_strings=["```", "\n\n#", "def ", "class "],
+                    use_cache=True,           # Enable KV cache
+                    early_stopping=True,     # Stop early when possible
+                    num_beams=1,             # Single beam for speed
+                    stop_strings=["```"],    # Reduced stop strings for speed
                     tokenizer=self.tokenizer
                 )
             
@@ -488,15 +533,38 @@ class StarCoder2Provider(BaseAIProvider):
             generated = self.tokenizer.decode(outputs[0][len(inputs[0]):], skip_special_tokens=True)
             code = self._clean_starcoder_output(generated)
             
-            return AIResponse(
+            response = AIResponse(
                 content=code,
                 provider="starcoder2",
                 model=self.model_name,
                 confidence=0.9
             )
             
+            # Cache successful response
+            self._cache[cache_key] = response
+            
+            # Cleanup old cache entries (keep last 10)
+            if len(self._cache) > 10:
+                oldest_key = next(iter(self._cache))
+                del self._cache[oldest_key]
+            
+            return response
+            
         except Exception as e:
             raise RuntimeError(f"StarCoder2 generation error: {str(e)}")
+    
+    def _create_optimized_prompt(self, command: str, dom: str = "") -> str:
+        """Create ultra-fast optimized prompt for StarCoder2"""
+        # Minimal prompt for speed
+        prompt = f"# Task: {command}\n"
+        
+        if dom and "add" in command.lower():
+            # Only include minimal DOM for add operations
+            dom_snippet = dom[:300] if len(dom) > 300 else dom
+            prompt += f"# DOM: {dom_snippet}\n"
+        
+        prompt += "# Playwright code:\n"
+        return prompt
     
     def _create_starcoder_prompt(self, command: str, dom: str = "") -> str:
         """Create optimized prompt for StarCoder2"""
@@ -807,9 +875,26 @@ class AIProviderManager:
             
             try:
                 print(f"Trying {provider_name} for code generation...")
-                result = await provider.generate_code(command, dom, screenshot)
-                print(f"✅ {provider_name} succeeded")
-                return result
+                
+                # Apply timeout for StarCoder2 (local model that can be slow)
+                if provider_name == "starcoder2":
+                    timeout = 10  # 10 second timeout for StarCoder2
+                    try:
+                        result = await asyncio.wait_for(
+                            provider.generate_code(command, dom, screenshot),
+                            timeout=timeout
+                        )
+                        print(f"✅ {provider_name} succeeded in <{timeout}s")
+                        return result
+                    except asyncio.TimeoutError:
+                        print(f"⏰ {provider_name} timed out after {timeout}s, falling back...")
+                        continue
+                else:
+                    # No timeout for cloud providers (they're usually fast)
+                    result = await provider.generate_code(command, dom, screenshot)
+                    print(f"✅ {provider_name} succeeded")
+                    return result
+                    
             except Exception as e:
                 print(f"❌ {provider_name} failed: {str(e)}")
                 last_error = e
