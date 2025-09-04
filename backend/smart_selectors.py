@@ -34,6 +34,34 @@ class SmartSelectorGenerator:
             'role': lambda role: f"[role='{role}']",
             'data_attr': lambda key, val: f"[data-{key}*='{val}' i]"
         }
+        
+        # E-commerce specific patterns for Add buttons
+        self.ecommerce_patterns = {
+            'add_to_cart_class': [
+                'button[class*="add"]',
+                'button[class*="cta"]', 
+                'button[class*="cart"]',
+                '*[class*="add-to-cart"]',
+                'button[class*="btn"][class*="add"]',
+                'button.btn.hand.cta-add',  # Domino's specific
+                '*[class*="add-item"]',
+                '*[class*="add-product"]'
+            ],
+            'add_button_data_attrs': [
+                '*[data-testid*="add"]',
+                '*[data-action*="add"]',
+                '*[data-product*="add"]',
+                'button[data-add]',
+                '*[data-cart*="add"]'
+            ],
+            'add_button_text_patterns': [
+                'button:has-text("+")',
+                '*[aria-label*="add" i]',
+                'button:has-text("Add"):has-text("cart")',
+                'button:has-text("Add"):has-text("bag")',
+                'button:has-text("Add"):has-text("basket")'
+            ]
+        }
     
     async def generate_selectors_for_text(self, page: Page, target_text: str, dom: str = "") -> List[SelectorStrategy]:
         """Generate multiple selector strategies for finding text-based elements"""
@@ -82,6 +110,32 @@ class SmartSelectorGenerator:
                 0.8
             ))
         
+        # Strategy 6: E-commerce specific Add button patterns (high priority for "Add" commands)
+        if any(keyword in clean_text.lower() for keyword in ['add', 'cart', 'buy', 'purchase']):
+            # Add class-based patterns
+            for i, pattern in enumerate(self.ecommerce_patterns['add_to_cart_class']):
+                strategies.append(SelectorStrategy(
+                    f"ecommerce_class_{i}",
+                    pattern,
+                    0.9 - (i * 0.05)  # High confidence for e-commerce patterns
+                ))
+            
+            # Add data attribute patterns
+            for i, pattern in enumerate(self.ecommerce_patterns['add_button_data_attrs']):
+                strategies.append(SelectorStrategy(
+                    f"ecommerce_data_{i}",
+                    pattern,
+                    0.85 - (i * 0.05)
+                ))
+            
+            # Add text-based e-commerce patterns
+            for i, pattern in enumerate(self.ecommerce_patterns['add_button_text_patterns']):
+                strategies.append(SelectorStrategy(
+                    f"ecommerce_text_{i}",
+                    pattern,
+                    0.8 - (i * 0.05)
+                ))
+        
         # Strategy 6: Parse DOM for better selectors
         if dom:
             dom_strategies = await self._analyze_dom_for_selectors(clean_text, dom)
@@ -117,16 +171,30 @@ class SmartSelectorGenerator:
                         0.95
                     ))
                 
-                # Add class-based selectors
+                # Add class-based selectors with enhanced e-commerce detection
                 if element.get('class'):
                     classes = element.get('class')
                     if isinstance(classes, list):
+                        # Combine multiple classes for better targeting
+                        all_classes = '.'.join(classes)
+                        confidence = 0.7
+                        
+                        # Boost confidence for e-commerce button patterns
+                        if any(keyword in ' '.join(classes).lower() for keyword in ['add', 'cta', 'cart', 'btn']):
+                            confidence = 0.85
+                            # Create combined class selector
+                            strategies.append(SelectorStrategy(
+                                f"combined_classes",
+                                f".{all_classes}",
+                                confidence + 0.05
+                            ))
+                        
                         for cls in classes:
                             if cls and not cls.startswith('_'):  # Skip generated classes
                                 strategies.append(SelectorStrategy(
                                     f"class_{cls}",
                                     f".{cls}",
-                                    0.7
+                                    confidence
                                 ))
                 
                 # Add attribute-based selectors
@@ -210,7 +278,7 @@ class SmartRetrySystem:
         self.retry_delay = 1.0
     
     async def smart_click(self, target_text: str, dom: str = "", screenshot: str = "") -> bool:
-        """Smart click with multiple retry strategies"""
+        """Smart click with multiple retry strategies and e-commerce enhancements"""
         
         # Generate selector strategies
         strategies = await self.selector_generator.generate_selectors_for_text(
@@ -222,7 +290,7 @@ class SmartRetrySystem:
             fuzzy_strategies = self.selector_generator.fuzzy_match_elements(target_text, dom)
             strategies.extend(fuzzy_strategies)
         
-        # Try each strategy
+        # Try each strategy with enhanced error handling
         for i, strategy in enumerate(strategies):
             try:
                 print(f"Attempt {i+1}: Trying {strategy.name} - {strategy.selector}")
@@ -235,14 +303,26 @@ class SmartRetrySystem:
                         print(f"✅ Coordinate click succeeded at {coords}")
                         return True
                 else:
-                    # Handle regular selectors
+                    # Handle regular selectors with enhanced e-commerce support
                     element = await self.page.wait_for_selector(strategy.selector, timeout=3000)
                     if element:
+                        # Scroll element into view for better interaction
+                        await element.scroll_into_view_if_needed()
+                        await self.page.wait_for_timeout(200)  # Brief pause after scroll
+                        
                         # Check if element is visible and enabled
                         is_visible = await element.is_visible()
                         is_enabled = await element.is_enabled()
                         
                         if is_visible and is_enabled:
+                            # For e-commerce buttons, try hover first to trigger any effects
+                            if any(keyword in strategy.name.lower() for keyword in ['ecommerce', 'add', 'cta']):
+                                try:
+                                    await element.hover()
+                                    await self.page.wait_for_timeout(300)
+                                except:
+                                    pass  # Hover failed, proceed anyway
+                            
                             await element.click()
                             print(f"✅ Click succeeded with {strategy.name}")
                             return True

@@ -26,8 +26,18 @@ class VisionAutomationEngine:
                 return False
         
         try:
+            # Enhanced command for e-commerce Add buttons
+            enhanced_command = command
+            if any(keyword in command.lower() for keyword in ['add', 'pizza', 'cart', 'buy']):
+                enhanced_command = (
+                    f"Find the 'Add' button for: {command}. "
+                    "Look for buttons with text 'Add', '+' symbol, or classes containing 'add', 'cta', or 'cart'. "
+                    "Focus on red/orange buttons or buttons with shopping cart icons. "
+                    "Return exact pixel coordinates of the center of the button."
+                )
+            
             # Analyze screenshot with AI
-            analysis = await ai_manager.analyze_screenshot_with_fallback(screenshot, command)
+            analysis = await ai_manager.analyze_screenshot_with_fallback(screenshot, enhanced_command)
             
             # Parse AI response for coordinates
             coordinates = self._parse_ai_coordinates(analysis.content)
