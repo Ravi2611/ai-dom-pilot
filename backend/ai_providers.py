@@ -490,22 +490,7 @@ class AIProviderManager:
         """Initialize available AI providers"""
         print("🔧 Setting up AI providers...")
         
-        # Ollama (Priority 1 - Free, unlimited, local)
-        ollama_host = os.getenv("OLLAMA_HOST", "localhost:11434")
-        ollama_model = os.getenv("OLLAMA_MODEL", "codellama:7b")
-        print(f"🐪 Attempting Ollama setup: {ollama_host} with model {ollama_model}")
-        try:
-            self.providers["ollama"] = OllamaProvider(ollama_host, ollama_model)
-            if self.providers["ollama"].is_available():
-                self.fallback_chain.append("ollama")
-                print(f"✅ Ollama provider added successfully with model {ollama_model}")
-            else:
-                print(f"❌ Ollama not available - server running? Model {ollama_model} exists?")
-                print(f"💡 Check: docker run -d -v ollama:/root/.ollama -p 11434:11434 --name ollama ollama/ollama")
-        except Exception as e:
-            print(f"❌ Ollama setup failed: {str(e)}")
-        
-        # Groq (Priority 2 - Fast, rate limited)
+        # Groq (Priority 1 - Fast, rate limited)
         groq_key = os.getenv("GROQ_API_KEY")
         print(f"🚀 Attempting Groq setup: API key {'✅ provided' if groq_key else '❌ missing'}")
         if groq_key:
@@ -520,6 +505,21 @@ class AIProviderManager:
                 print(f"❌ Groq setup failed: {str(e)}")
         else:
             print("⚠️ Groq API key not found in environment")
+        
+        # Ollama (Priority 2 - Free, unlimited, local, but slower)
+        ollama_host = os.getenv("OLLAMA_HOST", "localhost:11434")
+        ollama_model = os.getenv("OLLAMA_MODEL", "codellama:7b")
+        print(f"🐪 Attempting Ollama setup: {ollama_host} with model {ollama_model}")
+        try:
+            self.providers["ollama"] = OllamaProvider(ollama_host, ollama_model)
+            if self.providers["ollama"].is_available():
+                self.fallback_chain.append("ollama")
+                print(f"✅ Ollama provider added successfully with model {ollama_model}")
+            else:
+                print(f"❌ Ollama not available - server running? Model {ollama_model} exists?")
+                print(f"💡 Check: docker run -d -v ollama:/root/.ollama -p 11434:11434 --name ollama ollama/ollama")
+        except Exception as e:
+            print(f"❌ Ollama setup failed: {str(e)}")
         
         # OpenAI (Priority 3 - Reliable, expensive)
         openai_key = os.getenv("OPENAI_API_KEY")
