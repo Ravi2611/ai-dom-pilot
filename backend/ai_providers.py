@@ -40,8 +40,17 @@ try:
 except ImportError:
     ollama = None
 
+try:
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+except ImportError:
+    torch = None
+    AutoModelForCausalLM = None
+    AutoTokenizer = None
+
 
 class AIProvider(Enum):
+    STARCODER2 = "starcoder2"
     OLLAMA = "ollama"
     GROQ = "groq"
     OPENAI = "openai"
@@ -384,6 +393,193 @@ class AnthropicProvider(BaseAIProvider):
             raise RuntimeError(f"Anthropic vision analysis error: {str(e)}")
 
 
+class StarCoder2Provider(BaseAIProvider):
+    def __init__(self, model_name: str = "bigcode/starcoder2-3b"):
+        super().__init__("", model_name)  # No API key needed for local model
+        self.model_name = model_name
+        self.model = None
+        self.tokenizer = None
+        self.device = None
+        self._loading = False
+        
+    def is_available(self) -> bool:
+        """Check if required packages are available"""
+        return (torch is not None and 
+                AutoModelForCausalLM is not None and 
+                AutoTokenizer is not None)
+    
+    async def _load_model(self):
+        """Load the model and tokenizer if not already loaded"""
+        if self.model is not None or self._loading:
+            return
+            
+        self._loading = True
+        try:
+            print(f"🔥 Loading StarCoder2 model: {self.model_name}")
+            
+            # Detect device
+            if torch.cuda.is_available():
+                self.device = "cuda"
+                print("🚀 Using GPU acceleration")
+            else:
+                self.device = "cpu"
+                print("💻 Using CPU (consider GPU for faster inference)")
+            
+            # Load tokenizer
+            print("📚 Loading tokenizer...")
+            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+            if self.tokenizer.pad_token is None:
+                self.tokenizer.pad_token = self.tokenizer.eos_token
+            
+            # Load model
+            print("🧠 Loading model...")
+            self.model = AutoModelForCausalLM.from_pretrained(
+                self.model_name,
+                torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                device_map="auto" if self.device == "cuda" else None,
+                trust_remote_code=True
+            )
+            
+            if self.device == "cpu":
+                self.model = self.model.to(self.device)
+            
+            print("✅ StarCoder2 model loaded successfully!")
+            
+        except Exception as e:
+            print(f"❌ Failed to load StarCoder2 model: {str(e)}")
+            self.model = None
+            self.tokenizer = None
+            raise
+        finally:
+            self._loading = False
+    
+    async def generate_code(self, command: str, dom: str = "", screenshot: str = "") -> AIResponse:
+        if not self.is_available():
+            raise RuntimeError("StarCoder2 dependencies not available")
+        
+        await self._load_model()
+        
+        if self.model is None or self.tokenizer is None:
+            raise RuntimeError("StarCoder2 model not loaded")
+        
+        # Create specialized prompt for StarCoder2
+        prompt = self._create_starcoder_prompt(command, dom)
+        
+        try:
+            # Tokenize input
+            inputs = self.tokenizer.encode(prompt, return_tensors="pt", truncate=True, max_length=2048)
+            inputs = inputs.to(self.device)
+            
+            # Generate code
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    inputs,
+                    max_new_tokens=512,
+                    temperature=0.1,
+                    do_sample=True,
+                    top_p=0.95,
+                    pad_token_id=self.tokenizer.eos_token_id,
+                    eos_token_id=self.tokenizer.eos_token_id,
+                    stop_strings=["```", "\n\n#", "def ", "class "]
+                )
+            
+            # Decode response
+            generated = self.tokenizer.decode(outputs[0][len(inputs[0]):], skip_special_tokens=True)
+            code = self._clean_starcoder_output(generated)
+            
+            return AIResponse(
+                content=code,
+                provider="starcoder2",
+                model=self.model_name,
+                confidence=0.9
+            )
+            
+        except Exception as e:
+            raise RuntimeError(f"StarCoder2 generation error: {str(e)}")
+    
+    def _create_starcoder_prompt(self, command: str, dom: str = "") -> str:
+        """Create optimized prompt for StarCoder2"""
+        prompt = f"""# Playwright Python automation code
+# Task: {command}
+# Generate clean, executable Playwright code
+
+import asyncio
+from playwright.async_api import async_playwright
+
+async def automate(page):
+    # {command}
+"""
+        
+        if dom:
+            # Truncate DOM if too long
+            dom_snippet = dom[:1000] + "..." if len(dom) > 1000 else dom
+            prompt += f"""
+    # DOM context (partial):
+    # {dom_snippet}
+"""
+        
+        prompt += """
+    # Multiple selector strategies for robust clicking
+    selectors = [
+        'button[class*="cta-add"]',
+        'button[class*="add"]', 
+        'button.btn.hand.cta-add',
+        'button:has-text("Add")',
+        '*[data-testid*="add"]'
+    ]
+    
+    for selector in selectors:
+        try:
+            element = await page.wait_for_selector(selector, timeout=3000)
+            if element and await element.is_visible():
+                await element.scroll_into_view_if_needed()
+                await element.hover()
+                await element.click()
+                break
+        except:
+            continue
+"""
+        return prompt
+    
+    def _clean_starcoder_output(self, generated: str) -> str:
+        """Clean and extract code from StarCoder2 output"""
+        # Remove any markdown fences
+        if "```" in generated:
+            parts = generated.split("```")
+            for part in parts:
+                if "await" in part or "page." in part:
+                    generated = part.strip()
+                    break
+        
+        # Extract just the automation code (remove imports, function defs)
+        lines = generated.split('\n')
+        code_lines = []
+        in_function = False
+        
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith('async def') or stripped.startswith('def'):
+                in_function = True
+                continue
+            elif in_function and (stripped.startswith('await') or stripped.startswith('try:') or 
+                                stripped.startswith('for ') or stripped.startswith('selectors')):
+                # Extract indented content
+                code_lines.append(line[4:] if line.startswith('    ') else line)
+            elif not in_function and (stripped.startswith('await') or 'page.' in stripped):
+                code_lines.append(line)
+        
+        return '\n'.join(code_lines).strip()
+    
+    async def analyze_screenshot(self, screenshot: str, command: str) -> AIResponse:
+        # StarCoder2 doesn't support vision, delegate to next provider
+        return AIResponse(
+            content="Vision analysis not supported by StarCoder2",
+            provider="starcoder2", 
+            model=self.model_name,
+            confidence=0.0
+        )
+
+
 class OllamaProvider(BaseAIProvider):
     def __init__(self, host: str = "localhost:11434", model: str = "codellama:7b"):
         super().__init__("", model)  # Ollama doesn't use API keys
@@ -518,7 +714,20 @@ class AIProviderManager:
         """Initialize available AI providers"""
         print("🔧 Setting up AI providers...")
         
-        # Groq (Priority 1 - Fast, rate limited)
+        # StarCoder2 (Priority 1 - Local, free, unlimited, specialized for code)
+        print(f"⭐ Attempting StarCoder2 setup...")
+        try:
+            starcoder2_provider = StarCoder2Provider()
+            if starcoder2_provider.is_available():
+                self.providers["starcoder2"] = starcoder2_provider
+                self.fallback_chain.append("starcoder2")
+                print(f"✅ StarCoder2 provider added successfully (local model)")
+            else:
+                print(f"❌ StarCoder2 dependencies not available (torch/transformers missing)")
+        except Exception as e:
+            print(f"❌ StarCoder2 setup failed: {str(e)}")
+        
+        # Groq (Priority 2 - Fast, rate limited)
         groq_key = os.getenv("GROQ_API_KEY")
         print(f"🚀 Attempting Groq setup: API key {'✅ provided' if groq_key else '❌ missing'}")
         if groq_key:
@@ -534,7 +743,7 @@ class AIProviderManager:
         else:
             print("⚠️ Groq API key not found in environment")
         
-        # Ollama (Priority 2 - Free, unlimited, local, but slower)
+        # Ollama (Priority 3 - Free, unlimited, local, but slower)
         ollama_host = os.getenv("OLLAMA_HOST", "localhost:11434")
         ollama_model = os.getenv("OLLAMA_MODEL", "codellama:7b")
         print(f"🐪 Attempting Ollama setup: {ollama_host} with model {ollama_model}")
@@ -549,7 +758,7 @@ class AIProviderManager:
         except Exception as e:
             print(f"❌ Ollama setup failed: {str(e)}")
         
-        # OpenAI (Priority 3 - Reliable, expensive)
+        # OpenAI (Priority 4 - Reliable, expensive)
         openai_key = os.getenv("OPENAI_API_KEY")
         print(f"🤖 Attempting OpenAI setup: API key {'✅ provided' if openai_key else '❌ missing'}")
         if openai_key:
@@ -563,7 +772,7 @@ class AIProviderManager:
             except Exception as e:
                 print(f"❌ OpenAI setup failed: {str(e)}")
         
-        # Anthropic (Priority 4 - Reliable, expensive)
+        # Anthropic (Priority 5 - Reliable, expensive)
         anthropic_key = os.getenv("ANTHROPIC_API_KEY")
         print(f"🧠 Attempting Anthropic setup: API key {'✅ provided' if anthropic_key else '❌ missing'}")
         if anthropic_key:

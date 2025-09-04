@@ -10,3 +10,6 @@ websockets==12.0
 openai==1.57.0
 anthropic==0.39.0
 google-generativeai==0.8.3
+torch>=2.0.0
+transformers>=4.36.0
+accelerate>=0.20.0
