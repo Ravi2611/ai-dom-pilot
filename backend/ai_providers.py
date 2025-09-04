@@ -467,7 +467,7 @@ class StarCoder2Provider(BaseAIProvider):
         
         try:
             # Tokenize input
-            inputs = self.tokenizer.encode(prompt, return_tensors="pt", truncate=True, max_length=2048)
+            inputs = self.tokenizer.encode(prompt, return_tensors="pt", truncation=True, max_length=2048)
             inputs = inputs.to(self.device)
             
             # Generate code
